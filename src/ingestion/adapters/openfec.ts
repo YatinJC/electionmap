@@ -9,10 +9,13 @@
  */
 
 const API_BASE = "https://api.open.fec.gov/v1";
-const API_KEY = process.env.OPENFEC_API_KEY || "DEMO_KEY";
 const ELECTION_YEAR = 2026;
 const ELECTION_DATE = "2026-11-03";
 const PER_PAGE = 100;
+
+function getApiKey() {
+  return process.env.OPENFEC_API_KEY || "DEMO_KEY";
+}
 
 // State FIPS codes
 const STATE_FIPS: Record<string, string> = {
@@ -64,7 +67,7 @@ async function fetchAllPages(
   let totalPages = 1;
 
   while (page <= totalPages) {
-    const url = `${API_BASE}/candidates/search/?api_key=${API_KEY}&election_year=${ELECTION_YEAR}&office=${office}&is_active_candidate=true&per_page=${PER_PAGE}&page=${page}&sort=state`;
+    const url = `${API_BASE}/candidates/search/?api_key=${getApiKey()}&election_year=${ELECTION_YEAR}&office=${office}&is_active_candidate=true&per_page=${PER_PAGE}&page=${page}&sort=state`;
     const res = await fetch(url);
     if (!res.ok) {
       console.error(`FEC API error (page ${page}):`, res.status, res.statusText);
@@ -76,7 +79,7 @@ async function fetchAllPages(
     page++;
 
     // Rate limit: DEMO_KEY allows 1000 requests/hour, ~20/minute effective
-    await new Promise((r) => setTimeout(r, API_KEY === "DEMO_KEY" ? 3500 : 500));
+    await new Promise((r) => setTimeout(r, getApiKey() === "DEMO_KEY" ? 3500 : 500));
   }
 
   return results;

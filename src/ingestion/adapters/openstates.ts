@@ -9,9 +9,12 @@
  */
 
 const API_BASE = "https://v3.openstates.org";
-const API_KEY = process.env.OPEN_STATES_API_KEY;
 const ELECTION_DATE = "2026-11-03";
 const PER_PAGE = 50;
+
+function getApiKey() {
+  return process.env.OPEN_STATES_API_KEY;
+}
 
 // State abbreviation to FIPS
 const STATE_FIPS: Record<string, string> = {
@@ -65,7 +68,7 @@ async function fetchPeople(
   let hasMore = true;
 
   while (hasMore) {
-    const url = `${API_BASE}/people?jurisdiction=${encodeURIComponent(stateJurisdiction)}&org_classification=${chamber}&apikey=${API_KEY}&per_page=${PER_PAGE}&page=${page}`;
+    const url = `${API_BASE}/people?jurisdiction=${encodeURIComponent(stateJurisdiction)}&org_classification=${chamber}&apikey=${getApiKey()}&per_page=${PER_PAGE}&page=${page}`;
     const res = await fetch(url);
     if (!res.ok) {
       console.error(`  Open States error (${chamber} page ${page}):`, res.status);
@@ -91,7 +94,7 @@ function normalizeParty(party: string): string {
 }
 
 export async function fetchStateLegislatureElections(): Promise<NormalizedElection[]> {
-  if (!API_KEY) {
+  if (!getApiKey()) {
     console.error("OPEN_STATES_API_KEY not set, skipping");
     return [];
   }
@@ -99,7 +102,7 @@ export async function fetchStateLegislatureElections(): Promise<NormalizedElecti
   // 1. Get all state jurisdictions
   console.log("Fetching state jurisdictions...");
   const jRes = await fetch(
-    `${API_BASE}/jurisdictions?classification=state&per_page=52&apikey=${API_KEY}`
+    `${API_BASE}/jurisdictions?classification=state&per_page=52&apikey=${getApiKey()}`
   );
   const jData = await jRes.json();
   const jurisdictions: { id: string; name: string }[] = jData.results;

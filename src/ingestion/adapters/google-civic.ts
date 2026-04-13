@@ -9,7 +9,10 @@
  */
 
 const API_BASE = "https://www.googleapis.com/civicinfo/v2";
-const API_KEY = process.env.GOOGLE_CIVIC_API_KEY;
+
+function getApiKey() {
+  return process.env.GOOGLE_CIVIC_API_KEY;
+}
 
 // State FIPS lookup
 const STATE_FIPS: Record<string, string> = {
@@ -132,14 +135,14 @@ function normalizeParty(party: string | undefined): string {
 }
 
 export async function fetchGoogleCivicElections(): Promise<NormalizedElection[]> {
-  if (!API_KEY) {
+  if (!getApiKey()) {
     console.error("GOOGLE_CIVIC_API_KEY not set, skipping");
     return [];
   }
 
   // 1. Get active elections
   console.log("Fetching active elections from Google Civic...");
-  const electionsRes = await fetch(`${API_BASE}/elections?key=${API_KEY}`);
+  const electionsRes = await fetch(`${API_BASE}/elections?key=${getApiKey()}`);
   const electionsData = await electionsRes.json();
   const activeElections: CivicElection[] = (electionsData.elections || []).filter(
     (e: CivicElection) => e.id !== "2000" // Exclude test election
@@ -190,7 +193,7 @@ export async function fetchGoogleCivicElections(): Promise<NormalizedElection[]>
       const address = STATE_CAPITALS[stateAbbr];
       if (!address) continue;
 
-      const url = `${API_BASE}/voterinfo?key=${API_KEY}&address=${encodeURIComponent(address)}&electionId=${election.id}`;
+      const url = `${API_BASE}/voterinfo?key=${getApiKey()}&address=${encodeURIComponent(address)}&electionId=${election.id}`;
       const res = await fetch(url);
       if (!res.ok) {
         console.log(`    ${stateAbbr}: no data (${res.status})`);
