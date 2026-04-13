@@ -8,7 +8,7 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import type L from "leaflet";
-import type { Layer, LeafletMouseEvent, PathOptions } from "leaflet";
+import type { Layer, LeafletMouseEvent, PathOptions, Path } from "leaflet";
 import type { Feature, FeatureCollection, Geometry, Polygon, MultiPolygon } from "geojson";
 import * as topojson from "topojson-client";
 import type { Topology } from "topojson-specification";
@@ -49,7 +49,7 @@ interface ElectionMapProps {
 
 // ── Style helpers ─────────────────────────────────────────────────
 
-function stateStyle(_id: string, hasElections: boolean, isHovered: boolean, isLocked: boolean): PathOptions {
+function getStateStyle(hasElections: boolean, isHovered: boolean, isLocked: boolean): PathOptions {
   if (isLocked) {
     return { fillColor: MAP_COLORS.lockedFill, fillOpacity: 0.4, color: MAP_COLORS.locked, weight: 2.5, opacity: 0.9 };
   }
@@ -65,7 +65,7 @@ function stateStyle(_id: string, hasElections: boolean, isHovered: boolean, isLo
   };
 }
 
-function countyStyle(_id: string, hasElections: boolean, isHovered: boolean, isLocked: boolean): PathOptions {
+function getCountyStyle(hasElections: boolean, isHovered: boolean, isLocked: boolean): PathOptions {
   if (isLocked) {
     return { fillColor: MAP_COLORS.lockedFill, fillOpacity: 0.45, color: MAP_COLORS.locked, weight: 2.5, opacity: 1 };
   }
@@ -84,7 +84,7 @@ function countyStyle(_id: string, hasElections: boolean, isHovered: boolean, isL
   };
 }
 
-function districtStyle(_id: string, hasElections: boolean, isActive: boolean): PathOptions {
+function getDistrictStyle(hasElections: boolean, isActive: boolean): PathOptions {
   if (isActive) {
     return { fillColor: MAP_COLORS.hoverFill, fillOpacity: 0.15, color: MAP_COLORS.hover, weight: 2, opacity: 0.7, dashArray: "8 4" };
   }
@@ -102,26 +102,6 @@ function districtStyle(_id: string, hasElections: boolean, isActive: boolean): P
 function ZoomTracker({ onZoomChange }: { onZoomChange: (z: number) => void }) {
   useMapEvents({ zoomend: (e) => onZoomChange(e.target.getZoom()) });
   return null;
-}
-
-// ── Imperative style updater ──────────────────────────────────────
-// Instead of re-rendering the entire GeoJSON via key changes,
-// we imperatively update styles on individual Leaflet layers.
-
-function useLayerStyleUpdater(
-  layerRef: React.RefObject<L.GeoJSON | null>,
-  styleFn: (feature: GeoFeature) => PathOptions
-) {
-  useEffect(() => {
-    const layer = layerRef.current;
-    if (!layer) return;
-    layer.eachLayer((l: Layer) => {
-      const geoLayer = l as L.GeoJSON & { feature: GeoFeature };
-      if (geoLayer.feature) {
-        (l as L.Path).setStyle(styleFn(geoLayer.feature));
-      }
-    });
-  });
 }
 
 // ── Main component ────────────────────────────────────────────────
@@ -143,16 +123,19 @@ export default function ElectionMap({
   const [hoveredCountyId, setHoveredCountyId] = useState<string | null>(null);
   const [activeDistrictId, setActiveDistrictId] = useState<string | null>(null);
 
-  // Refs to GeoJSON layers for imperative style updates
+  // Refs for imperative layer access
   const stateLayerRef = useRef<L.GeoJSON | null>(null);
   const countyLayerRef = useRef<L.GeoJSON | null>(null);
   const districtLayerRef = useRef<L.GeoJSON | null>(null);
 
-  // Debounce timer for hover events
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Use refs for values that event handlers need to access without stale closures
+  const lockedRegionKeyRef = useRef(lockedRegionKey);
+  lockedRegionKeyRef.current = lockedRegionKey;
+  const showCountiesRef = useRef(false);
 
   const setZoom = useCallback((z: number) => {
     setZoomInternal(z);
+    showCountiesRef.current = z >= 7;
     onZoomChangeExternal?.(z);
   }, [onZoomChangeExternal]);
 
@@ -166,7 +149,7 @@ export default function ElectionMap({
   const lockedCountyId =
     lockedRegionKey?.startsWith("county:") ? lockedRegionKey.slice(7) : null;
 
-  // ── Load geo data ─────────────────────────────────────���─────────
+  // ── Load geo data ───────────────────────────────────────────────
 
   useEffect(() => {
     setMounted(true);
@@ -201,17 +184,14 @@ export default function ElectionMap({
     return map;
   }, [mapData]);
 
-  // Cache last district lookup to avoid recomputing for nearby points
   const lastDistrictLookup = useRef<{ lat: number; lng: number; result: string | null }>({ lat: 0, lng: 0, result: null });
 
   const findDistrict = useCallback(
     (lat: number, lng: number, stateFips: string): string | null => {
-      // Skip if point hasn't moved significantly (within ~0.01 degrees ≈ 1km)
       const last = lastDistrictLookup.current;
       if (Math.abs(lat - last.lat) < 0.01 && Math.abs(lng - last.lng) < 0.01) {
         return last.result;
       }
-
       const candidates = districtsByState.get(stateFips);
       if (!candidates) return null;
       const pt = turfPoint([lng, lat]);
@@ -222,7 +202,7 @@ export default function ElectionMap({
             result = d.properties.GEOID;
             break;
           }
-        } catch { /* skip invalid geometries */ }
+        } catch { /* skip */ }
       }
       lastDistrictLookup.current = { lat, lng, result };
       return result;
@@ -230,123 +210,163 @@ export default function ElectionMap({
     [districtsByState]
   );
 
-  // ── Imperative style updates (no re-render!) ────────────────────
+  // ── Imperative style updates ────────────────────────────────────
+  // Only update the specific layers that changed, not all layers every render.
 
-  useLayerStyleUpdater(stateLayerRef, (f) => {
+  // Update only the two affected state layers on hover change
+  const prevHoveredStateRef = useRef<string | null>(null);
+  useEffect(() => {
+    const layer = stateLayerRef.current;
+    if (!layer) return;
+    const prev = prevHoveredStateRef.current;
+    const curr = hoveredStateId;
+    if (prev === curr) return;
+    prevHoveredStateRef.current = curr;
+
+    layer.eachLayer((l: Layer) => {
+      const gl = l as unknown as { feature: GeoFeature };
+      if (!gl.feature) return;
+      const id = String(gl.feature.id);
+      if (id === prev || id === curr || id === lockedStateId) {
+        (l as Path).setStyle(getStateStyle(statesWithElections.has(id), id === curr, id === lockedStateId));
+      }
+    });
+  }, [hoveredStateId, lockedStateId, statesWithElections]);
+
+  // Update only the two affected county layers on hover change
+  const prevHoveredCountyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const layer = countyLayerRef.current;
+    if (!layer) return;
+    const prev = prevHoveredCountyRef.current;
+    const curr = hoveredCountyId;
+    if (prev === curr) return;
+    prevHoveredCountyRef.current = curr;
+
+    layer.eachLayer((l: Layer) => {
+      const gl = l as unknown as { feature: GeoFeature };
+      if (!gl.feature) return;
+      const id = String(gl.feature.id);
+      if (id === prev || id === curr || id === lockedCountyId) {
+        (l as Path).setStyle(getCountyStyle(countiesWithElections.has(id), id === curr, id === lockedCountyId));
+      }
+    });
+  }, [hoveredCountyId, lockedCountyId, countiesWithElections]);
+
+  // Update only the two affected district layers
+  const prevActiveDistrictRef = useRef<string | null>(null);
+  useEffect(() => {
+    const layer = districtLayerRef.current;
+    if (!layer) return;
+    const prev = prevActiveDistrictRef.current;
+    const curr = activeDistrictId;
+    if (prev === curr) return;
+    prevActiveDistrictRef.current = curr;
+
+    layer.eachLayer((l: Layer) => {
+      const gl = l as unknown as { feature: GeoFeature };
+      if (!gl.feature) return;
+      const id = gl.feature.properties.GEOID;
+      if (id === prev || id === curr) {
+        (l as Path).setStyle(getDistrictStyle(districtsWithElections.has(id), id === curr));
+      }
+    });
+  }, [activeDistrictId, districtsWithElections]);
+
+  // ── Event handlers via refs (no stale closures) ─────────────────
+  // Use refs for callbacks so GeoJSON event bindings always access latest state.
+
+  const onHoverRegionRef = useRef(onHoverRegion);
+  onHoverRegionRef.current = onHoverRegion;
+  const onClearHoverRef = useRef(onClearHover);
+  onClearHoverRef.current = onClearHover;
+  const onClickRegionRef = useRef(onClickRegion);
+  onClickRegionRef.current = onClickRegion;
+  const findDistrictRef = useRef(findDistrict);
+  findDistrictRef.current = findDistrict;
+
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Stable event binders — these never change, so GeoJSON binds them once
+  const onEachState = useCallback((feature: Feature, layer: Layer) => {
+    const f = feature as GeoFeature;
     const id = String(f.id);
-    return stateStyle(id, statesWithElections.has(id), hoveredStateId === id, lockedStateId === id);
-  });
+    const name = f.properties.name;
 
-  useLayerStyleUpdater(countyLayerRef, (f) => {
-    const id = String(f.id);
-    return countyStyle(id, countiesWithElections.has(id), hoveredCountyId === id, lockedCountyId === id);
-  });
-
-  useLayerStyleUpdater(districtLayerRef, (f) => {
-    const id = f.properties.GEOID;
-    return districtStyle(id, districtsWithElections.has(id), activeDistrictId === id);
-  });
-
-  // ── Hover handlers (debounced) ──────────────────────────────────
-
-  const handleStateHover = useCallback(
-    (id: string, name: string, _e: LeafletMouseEvent) => {
-      if (lockedRegionKey || showCounties) return;
-      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-      hoverTimerRef.current = setTimeout(() => {
-        setHoveredStateId(id);
+    layer.on({
+      mouseover: (_e: LeafletMouseEvent) => {
+        if (lockedRegionKeyRef.current || showCountiesRef.current) return;
+        if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+        hoverTimerRef.current = setTimeout(() => {
+          setHoveredStateId(id);
+          setActiveDistrictId(null);
+          onHoverRegionRef.current({ stateId: id, countyId: null, districtId: null, regionName: name });
+        }, 16);
+      },
+      mouseout: () => {
+        if (lockedRegionKeyRef.current) return;
+        if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+        setHoveredStateId(null);
+        setHoveredCountyId(null);
         setActiveDistrictId(null);
-        onHoverRegion({ stateId: id, countyId: null, districtId: null, regionName: name });
-      }, 30);
-    },
-    [showCounties, lockedRegionKey, onHoverRegion]
-  );
+        onClearHoverRef.current();
+      },
+      click: (_e: LeafletMouseEvent) => {
+        if (showCountiesRef.current) return;
+        setHoveredStateId(null);
+        setHoveredCountyId(null);
+        setActiveDistrictId(null);
+        onClickRegionRef.current({ stateId: id, countyId: null, districtId: null, regionName: name }, `state:${id}`);
+      },
+    });
+  }, []); // Empty deps — uses refs for all mutable values
 
-  const handleCountyHover = useCallback(
-    (id: string, name: string, e: LeafletMouseEvent) => {
-      if (lockedRegionKey) return;
-      if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-      hoverTimerRef.current = setTimeout(() => {
+  const onEachCounty = useCallback((feature: Feature, layer: Layer) => {
+    const f = feature as GeoFeature;
+    const id = String(f.id);
+    const name = f.properties.name;
+
+    layer.on({
+      mouseover: (e: LeafletMouseEvent) => {
+        if (lockedRegionKeyRef.current) return;
+        if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+        hoverTimerRef.current = setTimeout(() => {
+          const stateId = id.substring(0, 2);
+          setHoveredCountyId(id);
+          setHoveredStateId(stateId);
+          const { lat, lng } = e.latlng;
+          const districtId = findDistrictRef.current(lat, lng, stateId);
+          setActiveDistrictId(districtId);
+          onHoverRegionRef.current({ stateId, countyId: id, districtId, regionName: name });
+        }, 16);
+      },
+      mouseout: () => {
+        if (lockedRegionKeyRef.current) return;
+        if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+        setHoveredStateId(null);
+        setHoveredCountyId(null);
+        setActiveDistrictId(null);
+        onClearHoverRef.current();
+      },
+      click: (e: LeafletMouseEvent) => {
+        setHoveredStateId(null);
+        setHoveredCountyId(null);
         const stateId = id.substring(0, 2);
-        setHoveredCountyId(id);
-        setHoveredStateId(stateId);
         const { lat, lng } = e.latlng;
-        const districtId = findDistrict(lat, lng, stateId);
+        const districtId = findDistrictRef.current(lat, lng, stateId);
         setActiveDistrictId(districtId);
-        onHoverRegion({ stateId, countyId: id, districtId, regionName: name });
-      }, 30);
-    },
-    [lockedRegionKey, onHoverRegion, findDistrict]
-  );
+        onClickRegionRef.current({ stateId, countyId: id, districtId, regionName: name }, `county:${id}`);
+      },
+    });
+  }, []); // Empty deps — uses refs
 
-  const handleLeave = useCallback(() => {
-    if (lockedRegionKey) return;
-    if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
-    setHoveredStateId(null);
-    setHoveredCountyId(null);
-    setActiveDistrictId(null);
-    onClearHover();
-  }, [lockedRegionKey, onClearHover]);
-
-  // ── Click handlers ──────────────────────────────────────────────
-
-  const handleStateClick = useCallback(
-    (id: string, name: string, _e: LeafletMouseEvent) => {
-      if (showCounties) return;
-      setHoveredStateId(null);
-      setHoveredCountyId(null);
-      setActiveDistrictId(null);
-      onClickRegion({ stateId: id, countyId: null, districtId: null, regionName: name }, `state:${id}`);
-    },
-    [showCounties, onClickRegion]
-  );
-
-  const handleCountyClick = useCallback(
-    (id: string, name: string, e: LeafletMouseEvent) => {
-      setHoveredStateId(null);
-      setHoveredCountyId(null);
-      const stateId = id.substring(0, 2);
-      const { lat, lng } = e.latlng;
-      const districtId = findDistrict(lat, lng, stateId);
-      setActiveDistrictId(districtId);
-      onClickRegion({ stateId, countyId: id, districtId, regionName: name }, `county:${id}`);
-    },
-    [onClickRegion, findDistrict]
-  );
-
-  // ── Event binders (stable — no deps that change on hover) ──────
-
-  const onEachState = useCallback(
-    (feature: Feature, layer: Layer) => {
-      const f = feature as GeoFeature;
-      layer.on({
-        mouseover: (e: LeafletMouseEvent) => handleStateHover(String(f.id), f.properties.name, e),
-        mouseout: () => handleLeave(),
-        click: (e: LeafletMouseEvent) => handleStateClick(String(f.id), f.properties.name, e),
-      });
-    },
-    [handleStateHover, handleLeave, handleStateClick]
-  );
-
-  const onEachCounty = useCallback(
-    (feature: Feature, layer: Layer) => {
-      const f = feature as GeoFeature;
-      layer.on({
-        mouseover: (e: LeafletMouseEvent) => handleCountyHover(String(f.id), f.properties.name, e),
-        mouseout: () => handleLeave(),
-        click: (e: LeafletMouseEvent) => handleCountyClick(String(f.id), f.properties.name, e),
-      });
-    },
-    [handleCountyHover, handleLeave, handleCountyClick]
-  );
-
-  // ── Initial style functions (used only on first render) ─────────
+  // ── Initial style functions ─────────────────────────────────────
 
   const initialStateStyle = useCallback(
     (feature?: Feature): PathOptions => {
       if (!feature) return {};
       const id = String(feature.id);
-      return stateStyle(id, statesWithElections.has(id), false, lockedStateId === id);
+      return getStateStyle(statesWithElections.has(id), false, lockedStateId === id);
     },
     [statesWithElections, lockedStateId]
   );
@@ -355,7 +375,7 @@ export default function ElectionMap({
     (feature?: Feature): PathOptions => {
       if (!feature) return {};
       const id = String(feature.id);
-      return countyStyle(id, countiesWithElections.has(id), false, lockedCountyId === id);
+      return getCountyStyle(countiesWithElections.has(id), false, lockedCountyId === id);
     },
     [countiesWithElections, lockedCountyId]
   );
@@ -364,12 +384,12 @@ export default function ElectionMap({
     (feature?: Feature): PathOptions => {
       if (!feature) return {};
       const f = feature as GeoFeature;
-      return districtStyle(f.properties.GEOID, districtsWithElections.has(f.properties.GEOID), false);
+      return getDistrictStyle(districtsWithElections.has(f.properties.GEOID), false);
     },
     [districtsWithElections]
   );
 
-  // ── GeoJSON data objects (stable references) ────────────────────
+  // ── Stable GeoJSON data ─────────────────────────────────────────
 
   const statesFC = useMemo(
     () => mapData ? { type: "FeatureCollection" as const, features: mapData.states } as FeatureCollection : null,
