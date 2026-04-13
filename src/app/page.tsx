@@ -217,11 +217,6 @@ export default function Home() {
               ))}
             </select>
           </div>
-          <p className="text-slate-500 text-xs hidden md:block font-mono">
-            {isLocked
-              ? "Esc to unlock"
-              : "Hover \u00b7 Click \u00b7 Scroll"}
-          </p>
         </div>
       </header>
 
