@@ -8,7 +8,8 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const stateId = params.get("stateId");
   const countyId = params.get("countyId");
-  const districtId = params.get("districtId"); // e.g. "0804" for CO-4
+  const districtId = params.get("districtId");
+  const months = parseInt(params.get("months") || "6", 10); // time window in months
 
   if (!stateId) {
     return NextResponse.json(
@@ -16,6 +17,13 @@ export async function GET(request: NextRequest) {
       { status: 400 }
     );
   }
+
+  // Calculate date window: today → today + N months
+  const now = new Date();
+  const cutoff = new Date(now);
+  cutoff.setMonth(cutoff.getMonth() + months);
+  const todayStr = now.toISOString().split("T")[0];
+  const cutoffStr = cutoff.toISOString().split("T")[0];
 
   // Build OR conditions for all applicable region types
   const conditions: string[] = [
@@ -28,7 +36,7 @@ export async function GET(request: NextRequest) {
     conditions.push(`and(region_type.eq.congressional_district,region_id.eq.${districtId})`);
   }
 
-  let query = supabase
+  const { data, error } = await supabase
     .from("elections")
     .select(`
       id, office, level, district, date, description,
@@ -36,15 +44,16 @@ export async function GET(request: NextRequest) {
       candidates (name, party, incumbent, website, description)
     `)
     .eq("status", "active")
-    .or(conditions.join(","));
-
-  const { data, error } = await query.order("level").order("date");
+    .gte("date", todayStr)
+    .lte("date", cutoffStr)
+    .or(conditions.join(","))
+    .order("date")
+    .order("level");
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // Map to frontend shape
   const elections = (data ?? []).map((e) => ({
     id: e.id,
     office: e.office,

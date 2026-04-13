@@ -19,14 +19,15 @@ const ElectionMap = dynamic(() => import("@/components/ElectionMap"), {
   ),
 });
 
+// Cache keyed by months + region so changing the time window invalidates
 const electionCache = new Map<string, Election[]>();
 
-async function fetchElections(info: HoverInfo): Promise<Election[]> {
-  const cacheKey = `${info.stateId}:${info.countyId ?? ""}:${info.districtId ?? ""}`;
+async function fetchElections(info: HoverInfo, months: number): Promise<Election[]> {
+  const cacheKey = `${months}:${info.stateId}:${info.countyId ?? ""}:${info.districtId ?? ""}`;
   const cached = electionCache.get(cacheKey);
   if (cached) return cached;
 
-  const params = new URLSearchParams({ stateId: info.stateId });
+  const params = new URLSearchParams({ stateId: info.stateId, months: String(months) });
   if (info.countyId) params.set("countyId", info.countyId);
   if (info.districtId) params.set("districtId", info.districtId);
 
@@ -38,7 +39,16 @@ async function fetchElections(info: HoverInfo): Promise<Election[]> {
   return elections;
 }
 
+const TIME_WINDOW_OPTIONS = [
+  { value: 1, label: "1 month" },
+  { value: 3, label: "3 months" },
+  { value: 6, label: "6 months" },
+  { value: 12, label: "1 year" },
+  { value: 24, label: "2 years" },
+];
+
 export default function Home() {
+  const [months, setMonths] = useState(12);
   const [statesWithElections, setStatesWithElections] = useState<Set<string>>(new Set());
   const [countiesWithElections, setCountiesWithElections] = useState<Set<string>>(new Set());
   const [districtsWithElections, setDistrictsWithElections] = useState<Set<string>>(new Set());
@@ -56,8 +66,18 @@ export default function Home() {
   const displayElections = isLocked ? lockedElections : hoveredElections;
   const displayRegionName = isLocked ? lockedRegionName : hoveredRegionName;
 
+  // Fetch region summary — re-fetch when time window changes
   useEffect(() => {
-    fetch("/api/regions/summary")
+    setSummaryLoaded(false);
+    electionCache.clear();
+    // Clear any locked/hovered state since data is changing
+    setLockedElections([]);
+    setLockedRegionName("");
+    setLockedRegionKey(null);
+    setHoveredElections([]);
+    setHoveredRegionName("");
+
+    fetch(`/api/regions/summary?months=${months}`)
       .then((r) => r.json())
       .then((data) => {
         setStatesWithElections(new Set(data.statesWithElections));
@@ -66,13 +86,13 @@ export default function Home() {
         setSummaryLoaded(true);
       })
       .catch(() => setSummaryLoaded(true));
-  }, []);
+  }, [months]);
 
   const handleHoverRegion = useCallback(async (info: HoverInfo) => {
-    const elections = await fetchElections(info);
+    const elections = await fetchElections(info, months);
     setHoveredElections(elections);
     setHoveredRegionName(info.regionName);
-  }, []);
+  }, [months]);
 
   const handleClearHover = useCallback(() => {
     setHoveredElections([]);
@@ -86,13 +106,13 @@ export default function Home() {
         setLockedRegionName("");
         setLockedRegionKey(null);
       } else {
-        const elections = await fetchElections(info);
+        const elections = await fetchElections(info, months);
         setLockedElections(elections);
         setLockedRegionName(info.regionName);
         setLockedRegionKey(regionKey);
       }
     },
-    [lockedRegionKey]
+    [lockedRegionKey, months]
   );
 
   const handleUnlock = useCallback(() => {
@@ -120,14 +140,34 @@ export default function Home() {
             Beta
           </span>
         </div>
-        <p className="text-slate-400 text-sm hidden sm:block">
+        <p className="text-slate-400 text-sm hidden md:block">
           Every Election, Everywhere
         </p>
-        <p className="text-slate-500 text-xs hidden sm:block font-mono">
-          {isLocked
-            ? "Esc or click to unlock"
-            : "Hover to explore \u00b7 Click to lock \u00b7 Scroll to zoom"}
-        </p>
+        <div className="flex items-center gap-3">
+          {/* Time window selector */}
+          <div className="flex items-center gap-2">
+            <label htmlFor="time-window" className="text-slate-500 text-xs hidden sm:block">
+              Showing next
+            </label>
+            <select
+              id="time-window"
+              value={months}
+              onChange={(e) => setMonths(parseInt(e.target.value, 10))}
+              className="bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded px-2 py-1 focus:outline-none focus:border-slate-500 cursor-pointer"
+            >
+              {TIME_WINDOW_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <p className="text-slate-500 text-xs hidden sm:block font-mono">
+            {isLocked
+              ? "Esc to unlock"
+              : "Hover \u00b7 Click \u00b7 Scroll"}
+          </p>
+        </div>
       </header>
 
       <div className="flex-1 flex relative overflow-hidden min-h-0">
