@@ -10,7 +10,6 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:seed": "tsx src/db/seed.ts",
     "db:studio": "drizzle-kit studio",
     "ingest": "tsx src/ingestion/run.ts",
     "generate-descriptions": "tsx src/lib/ai/run.ts"

@@ -123,8 +123,10 @@ export async function generateMissingDescriptions(
 
   const anthropic = new Anthropic({ apiKey });
 
-  // Find elections missing either description or why_it_matters,
-  // excluding any that were manually written by volunteers
+  // Find elections missing either description or why_it_matters.
+  // Skip elections where a human has already written content.
+  // Note: why_it_matters_source is null for most API-ingested elections,
+  // "manual" for seed data, "volunteer" for community edits, "ai_generated" for prior AI runs.
   const { data: elections, error } = await supabase
     .from("elections")
     .select(`
@@ -134,7 +136,7 @@ export async function generateMissingDescriptions(
     `)
     .eq("status", "active")
     .or("description.is.null,why_it_matters.is.null")
-    .not("why_it_matters_source", "in", '("manual","volunteer")')
+    .or("why_it_matters_source.is.null,why_it_matters_source.eq.ai_generated")
     .limit(batchLimit);
 
   if (error) {

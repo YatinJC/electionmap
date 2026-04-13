@@ -1,0 +1,1 @@
+- [ElectionMap core product vision](project_vision.md) — self-updating elections, time-filtered display, pending BallotReady/Democracy Works outreach
