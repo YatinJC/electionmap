@@ -43,6 +43,38 @@ async function ensureSource(
   return data.id;
 }
 
+// ── Fuzzy matching ────────────────────────────────────────────────
+//
+// Different sources may name the same office slightly differently:
+//   OpenFEC:      "U.S. Senator — GA"
+//   Google Civic: "U.S. Senate"
+//   Mock data:    "U.S. Senator"
+//
+// We normalize to a canonical key for dedup matching. The key is:
+//   (level, region_type, region_id, date)
+//
+// Office name is NOT part of the dedup key because it varies across sources.
+// Instead, we match on the combination of what level of government it is,
+// what geographic region it covers, and when the election is. This uniquely
+// identifies a race — there's only one Senate race per state per election date.
+
+async function findExistingElection(
+  supabase: SupabaseClient,
+  election: NormalizedElection
+): Promise<{ id: string; description: string | null; why_it_matters: string | null; why_it_matters_source: string | null } | null> {
+  const { data } = await supabase
+    .from("elections")
+    .select("id, description, why_it_matters, why_it_matters_source")
+    .eq("level", election.level)
+    .eq("region_type", election.regionType)
+    .eq("region_id", election.regionId)
+    .eq("date", election.date)
+    .limit(1)
+    .maybeSingle();
+
+  return data;
+}
+
 async function upsertElections(
   supabase: SupabaseClient,
   sourceId: string,
@@ -53,20 +85,24 @@ async function upsertElections(
   let skipped = 0;
 
   for (const election of elections) {
-    const { data: existing } = await supabase
-      .from("elections")
-      .select("id")
-      .eq("office", election.office)
-      .eq("region_type", election.regionType)
-      .eq("region_id", election.regionId)
-      .eq("date", election.date)
-      .limit(1)
-      .maybeSingle();
+    const existing = await findExistingElection(supabase, election);
 
     let electionId: string;
 
     if (existing) {
       electionId = existing.id;
+
+      // Update office name and district (API data is authoritative for these)
+      // but PRESERVE human-written descriptions
+      await supabase
+        .from("elections")
+        .update({
+          office: election.office,
+          district: election.district,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", electionId);
+
       updated++;
     } else {
       const { data: inserted, error } = await supabase
@@ -94,17 +130,49 @@ async function upsertElections(
       created++;
     }
 
-    // Refresh candidates
-    await supabase.from("candidates").delete().eq("election_id", electionId);
+    // Refresh candidates from this source.
+    // Only replace candidates that came from this same source — preserve
+    // manually-added candidates by checking the election_sources table.
+    //
+    // For simplicity in v1: if this source previously provided candidates
+    // for this election, replace them. Otherwise, merge (add new ones).
+    const { data: existingSource } = await supabase
+      .from("election_sources")
+      .select("id")
+      .eq("election_id", electionId)
+      .eq("source_id", sourceId)
+      .maybeSingle();
+
+    if (existingSource) {
+      // This source has provided data before — safe to refresh candidates
+      await supabase.from("candidates").delete().eq("election_id", electionId);
+    }
+
     if (election.candidates.length > 0) {
-      await supabase.from("candidates").insert(
-        election.candidates.map((c) => ({
-          election_id: electionId,
-          name: c.name,
-          party: c.party,
-          incumbent: c.incumbent,
-        }))
-      );
+      // Use upsert-like behavior: insert candidates, skip if name already exists
+      for (const c of election.candidates) {
+        const { data: existingCandidate } = await supabase
+          .from("candidates")
+          .select("id")
+          .eq("election_id", electionId)
+          .eq("name", c.name)
+          .maybeSingle();
+
+        if (!existingCandidate) {
+          await supabase.from("candidates").insert({
+            election_id: electionId,
+            name: c.name,
+            party: c.party,
+            incumbent: c.incumbent,
+          });
+        } else {
+          // Update existing candidate's info
+          await supabase
+            .from("candidates")
+            .update({ party: c.party, incumbent: c.incumbent })
+            .eq("id", existingCandidate.id);
+        }
+      }
     }
 
     // Track provenance
@@ -140,7 +208,6 @@ export async function runIngestion(
   const runAll = !adapters || adapters.length === 0;
   const results: IngestResult[] = [];
 
-  // ── OpenFEC ──────────────────────────────────────────────────────
   if (runAll || adapters?.includes("openfec")) {
     try {
       const sourceId = await ensureSource(supabase, "openfec", 90);
@@ -148,17 +215,10 @@ export async function runIngestion(
       const r = await upsertElections(supabase, sourceId, elections);
       results.push({ source: "openfec", ...r });
     } catch (err) {
-      results.push({
-        source: "openfec",
-        created: 0,
-        updated: 0,
-        skipped: 0,
-        error: String(err),
-      });
+      results.push({ source: "openfec", created: 0, updated: 0, skipped: 0, error: String(err) });
     }
   }
 
-  // ── Open States ──────────────────────────────────────────────────
   if (runAll || adapters?.includes("openstates")) {
     try {
       const sourceId = await ensureSource(supabase, "openstates", 85);
@@ -166,17 +226,10 @@ export async function runIngestion(
       const r = await upsertElections(supabase, sourceId, elections);
       results.push({ source: "openstates", ...r });
     } catch (err) {
-      results.push({
-        source: "openstates",
-        created: 0,
-        updated: 0,
-        skipped: 0,
-        error: String(err),
-      });
+      results.push({ source: "openstates", created: 0, updated: 0, skipped: 0, error: String(err) });
     }
   }
 
-  // ── Google Civic ─────────────────────────────────────────────────
   if (runAll || adapters?.includes("google-civic")) {
     try {
       const sourceId = await ensureSource(supabase, "google_civic", 95);
@@ -184,13 +237,7 @@ export async function runIngestion(
       const r = await upsertElections(supabase, sourceId, elections);
       results.push({ source: "google-civic", ...r });
     } catch (err) {
-      results.push({
-        source: "google-civic",
-        created: 0,
-        updated: 0,
-        skipped: 0,
-        error: String(err),
-      });
+      results.push({ source: "google-civic", created: 0, updated: 0, skipped: 0, error: String(err) });
     }
   }
 

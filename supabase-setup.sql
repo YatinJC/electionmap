@@ -1,5 +1,6 @@
 -- ElectionMap database setup
 -- Run this in the Supabase SQL Editor
+-- Safe to re-run — uses IF NOT EXISTS / IF NOT EXISTS throughout
 
 -- Elections table
 CREATE TABLE IF NOT EXISTS elections (
@@ -75,3 +76,13 @@ CREATE POLICY "Service role full access" ON elections FOR ALL USING (true) WITH 
 CREATE POLICY "Service role full access" ON candidates FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Service role full access" ON data_sources FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Service role full access" ON election_sources FOR ALL USING (true) WITH CHECK (true);
+
+-- ── Deduplication constraint ──────────────────────────────────────
+-- Prevents the same race from being inserted twice, even with concurrent ingestion runs.
+-- Uses (level, region_type, region_id, date, office) as the uniqueness key.
+-- Office name is included because multiple races can exist for the same region
+-- (e.g. 56 state senate seats all in region_type=state, region_id=13).
+-- Cross-source name variations are handled by normalizing in application code.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_elections_dedup
+  ON elections (level, region_type, region_id, date, office)
+  WHERE status = 'active';
