@@ -75,5 +75,6 @@ export async function GET(request: NextRequest) {
     statesWithElections: Array.from(stateSet),
     countiesWithElections: Array.from(countySet),
     districtsWithElections: Array.from(districtSet),
+    totalElections: allRows.length,
   });
 }

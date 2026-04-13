@@ -75,6 +75,7 @@ export default function Home() {
   const [countiesWithElections, setCountiesWithElections] = useState<Set<string>>(new Set());
   const [districtsWithElections, setDistrictsWithElections] = useState<Set<string>>(new Set());
   const [summaryLoaded, setSummaryLoaded] = useState(false);
+  const [totalElections, setTotalElections] = useState(0);
   const [flyTo, setFlyTo] = useState<FlyToTarget | null>(null);
   const [mapZoom, setMapZoom] = useState(5);
 
@@ -121,6 +122,7 @@ export default function Home() {
         setStatesWithElections(new Set(data.statesWithElections));
         setCountiesWithElections(new Set(data.countiesWithElections));
         setDistrictsWithElections(new Set(data.districtsWithElections ?? []));
+        setTotalElections(data.totalElections ?? 0);
         setSummaryLoaded(true);
       })
       .catch(() => setSummaryLoaded(true));
@@ -179,7 +181,11 @@ export default function Home() {
           </span>
         </div>
         <p className="text-slate-400 text-sm hidden lg:block">
-          Every Election, Everywhere
+          {totalElections > 0 ? (
+            <><span className="text-white font-semibold">{totalElections.toLocaleString()}</span> upcoming elections</>
+          ) : (
+            "Every Election, Everywhere"
+          )}
         </p>
         <div className="flex items-center gap-3">
           {/* Location search */}
