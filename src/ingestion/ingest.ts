@@ -6,6 +6,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllFederalElections } from "./adapters/openfec";
 import { fetchStateLegislatureElections } from "./adapters/openstates";
 import { fetchGoogleCivicElections } from "./adapters/google-civic";
+import { fetchStateLegislatureBulk } from "./adapters/openstates-bulk";
 
 interface NormalizedElection {
   office: string;
@@ -211,7 +212,7 @@ async function upsertElections(
   return { created, updated, skipped };
 }
 
-export type Adapter = "openfec" | "openstates" | "google-civic";
+export type Adapter = "openfec" | "openstates" | "openstates-bulk" | "google-civic";
 
 /**
  * Run ingestion for the specified adapters (or all if none specified).
@@ -248,6 +249,18 @@ export async function runIngestion(
       results.push({ source: "openstates", ...r });
     } catch (err) {
       results.push({ source: "openstates", created: 0, updated: 0, skipped: 0, error: String(err) });
+    }
+  }
+
+  // Open States bulk import — reads from cloned GitHub repo, no API rate limits
+  if (adapters?.includes("openstates-bulk")) {
+    try {
+      const sourceId = await ensureSource(supabase, "openstates", 85);
+      const elections = await fetchStateLegislatureBulk();
+      const r = await upsertElections(supabase, sourceId, elections);
+      results.push({ source: "openstates-bulk", ...r });
+    } catch (err) {
+      results.push({ source: "openstates-bulk", created: 0, updated: 0, skipped: 0, error: String(err) });
     }
   }
 
