@@ -155,44 +155,47 @@ export async function generateMissingDescriptions(
   let skipped = 0;
   let errors = 0;
 
-  for (const election of elections as ElectionRow[]) {
-    try {
-      const result = await generateForElection(anthropic, election);
-      if (!result) {
-        console.error(`  Failed to parse response for: ${election.office}`);
-        errors++;
-        continue;
-      }
+  // Process in parallel batches of CONCURRENCY
+  const CONCURRENCY = 10;
+  const electionList = elections as ElectionRow[];
 
-      // Only update fields that are currently null — don't overwrite existing content
-      const updates: Record<string, string> = {};
-      if (!election.description) {
-        updates.description = result.description;
-      }
-      if (!election.why_it_matters) {
-        updates.why_it_matters = result.whyItMatters;
-        updates.why_it_matters_source = "ai_generated";
-      }
+  for (let i = 0; i < electionList.length; i += CONCURRENCY) {
+    const batch = electionList.slice(i, i + CONCURRENCY);
+    process.stdout.write(`\r  Processing ${i + batch.length}/${electionList.length} (${generated} generated, ${errors} errors)...`);
 
-      if (Object.keys(updates).length > 0) {
-        updates.updated_at = new Date().toISOString();
-        await supabase.from("elections").update(updates).eq("id", election.id);
-        generated++;
-        console.log(`  Generated: ${election.office}`);
+    const results = await Promise.allSettled(
+      batch.map(async (election) => {
+        const result = await generateForElection(anthropic, election);
+        if (!result) throw new Error("Failed to parse");
+
+        const updates: Record<string, string> = {};
+        if (!election.description) {
+          updates.description = result.description;
+        }
+        if (!election.why_it_matters) {
+          updates.why_it_matters = result.whyItMatters;
+          updates.why_it_matters_source = "ai_generated";
+        }
+
+        if (Object.keys(updates).length > 0) {
+          updates.updated_at = new Date().toISOString();
+          await supabase!.from("elections").update(updates).eq("id", election.id);
+          return "generated";
+        }
+        return "skipped";
+      })
+    );
+
+    for (const r of results) {
+      if (r.status === "fulfilled") {
+        if (r.value === "generated") generated++;
+        else skipped++;
       } else {
-        skipped++;
+        errors++;
       }
-
-      // Small delay to be respectful to the API
-      await new Promise((r) => setTimeout(r, 200));
-    } catch (err) {
-      console.error(`  Error generating for ${election.office}:`, err);
-      errors++;
     }
   }
 
-  console.log(
-    `Done! Generated: ${generated}, Skipped: ${skipped}, Errors: ${errors}`
-  );
+  console.log(`\n  Done! Generated: ${generated}, Skipped: ${skipped}, Errors: ${errors}`);
   return { generated, skipped, errors };
 }

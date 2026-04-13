@@ -10,7 +10,7 @@ import { config } from "dotenv";
 config({ path: ".env.local" });
 import { generateMissingDescriptions } from "./generate-descriptions";
 
-const CLI_BATCH_LIMIT = 500;
+const CLI_BATCH_LIMIT = 1000;
 
 generateMissingDescriptions(undefined, CLI_BATCH_LIMIT)
   .then((result) => {
