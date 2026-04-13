@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   const countyId = params.get("countyId");
   const districtId = params.get("districtId");
   const months = parseInt(params.get("months") || "6", 10);
-  const levels = params.get("levels"); // comma-separated: "federal,state,county"
+  const levels = params.get("levels");
 
   if (!stateId) {
     return NextResponse.json(
@@ -19,22 +19,37 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // Calculate date window: today → today + N months
   const now = new Date();
   const cutoff = new Date(now);
   cutoff.setMonth(cutoff.getMonth() + months);
   const todayStr = now.toISOString().split("T")[0];
   const cutoffStr = cutoff.toISOString().split("T")[0];
 
-  // Build OR conditions for all applicable region types
+  // When a specific county or district is provided, fetch elections for
+  // that region plus the parent state (precise query for zoomed-in view).
+  //
+  // When ONLY stateId is provided (zoomed-out view), fetch ALL elections
+  // in the state — statewide, county, and district. This ensures states
+  // like Nevada (which only has House races, no statewide elections)
+  // still show data on hover.
   const conditions: string[] = [
     `and(region_type.eq.state,region_id.eq.${stateId})`,
   ];
-  if (countyId) {
-    conditions.push(`and(region_type.eq.county,region_id.eq.${countyId})`);
-  }
-  if (districtId) {
-    conditions.push(`and(region_type.eq.congressional_district,region_id.eq.${districtId})`);
+
+  if (countyId || districtId) {
+    // Zoomed in — specific region
+    if (countyId) {
+      conditions.push(`and(region_type.eq.county,region_id.eq.${countyId})`);
+    }
+    if (districtId) {
+      conditions.push(`and(region_type.eq.congressional_district,region_id.eq.${districtId})`);
+    }
+  } else {
+    // Zoomed out — show everything in this state
+    // Congressional districts: region_id starts with state FIPS (e.g. "32" for NV)
+    conditions.push(`and(region_type.eq.congressional_district,region_id.like.${stateId}*)`);
+    // Counties: region_id starts with state FIPS
+    conditions.push(`and(region_type.eq.county,region_id.like.${stateId}*)`);
   }
 
   let query = supabase
