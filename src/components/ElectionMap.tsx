@@ -5,6 +5,7 @@ import {
   MapContainer,
   TileLayer,
   GeoJSON,
+  useMap,
   useMapEvents,
 } from "react-leaflet";
 import type L from "leaflet";
@@ -40,6 +41,12 @@ export interface HoverInfo {
   regionName: string;
 }
 
+export interface FlyToTarget {
+  lat: number;
+  lng: number;
+  zoom: number;
+}
+
 interface ElectionMapProps {
   statesWithElections: Set<string>;
   countiesWithElections: Set<string>;
@@ -49,6 +56,7 @@ interface ElectionMapProps {
   onClickRegion: (info: HoverInfo, regionKey: string) => void;
   lockedRegionKey: string | null;
   onZoomChange?: (zoom: number) => void;
+  flyTo?: FlyToTarget | null;
 }
 
 // ── Style helpers ─────────────────────────────────────────────────
@@ -108,6 +116,16 @@ function ZoomTracker({ onZoomChange }: { onZoomChange: (z: number) => void }) {
   return null;
 }
 
+function FlyToHandler({ target }: { target: FlyToTarget | null | undefined }) {
+  const map = useMap();
+  useEffect(() => {
+    if (target) {
+      map.flyTo([target.lat, target.lng], target.zoom, { duration: 1.5 });
+    }
+  }, [target, map]);
+  return null;
+}
+
 // ── Main component ────────────────────────────────────────────────
 
 export default function ElectionMap({
@@ -119,6 +137,7 @@ export default function ElectionMap({
   onClickRegion,
   lockedRegionKey,
   onZoomChange: onZoomChangeExternal,
+  flyTo: flyToTarget,
 }: ElectionMapProps) {
   const [mounted, setMounted] = useState(false);
   const [mapData, setMapData] = useState<MapData | null>(null);
@@ -494,6 +513,7 @@ export default function ElectionMap({
         url="https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png"
       />
       <ZoomTracker onZoomChange={setZoom} />
+      <FlyToHandler target={flyToTarget} />
 
       <GeoJSON
         ref={stateLayerRef}

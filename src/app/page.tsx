@@ -6,7 +6,8 @@ import ElectionPanel from "@/components/ElectionPanel";
 import { Election } from "@/types/elections";
 import MapLegend from "@/components/MapLegend";
 import { LEVEL_COLORS } from "@/lib/constants";
-import type { HoverInfo } from "@/components/ElectionMap";
+import LocationSearch from "@/components/LocationSearch";
+import type { HoverInfo, FlyToTarget } from "@/components/ElectionMap";
 
 const ElectionMap = dynamic(() => import("@/components/ElectionMap"), {
   ssr: false,
@@ -74,6 +75,7 @@ export default function Home() {
   const [countiesWithElections, setCountiesWithElections] = useState<Set<string>>(new Set());
   const [districtsWithElections, setDistrictsWithElections] = useState<Set<string>>(new Set());
   const [summaryLoaded, setSummaryLoaded] = useState(false);
+  const [flyTo, setFlyTo] = useState<FlyToTarget | null>(null);
   const [mapZoom, setMapZoom] = useState(5);
 
   const [hoveredElections, setHoveredElections] = useState<Election[]>([]);
@@ -180,6 +182,9 @@ export default function Home() {
           Every Election, Everywhere
         </p>
         <div className="flex items-center gap-3">
+          {/* Location search */}
+          <LocationSearch onFlyTo={setFlyTo} />
+
           {/* Level filter toggles */}
           <div className="flex items-center gap-1 hidden sm:flex">
             {ALL_LEVELS.map((level) => {
@@ -234,6 +239,7 @@ export default function Home() {
               onClickRegion={handleClickRegion}
               lockedRegionKey={lockedRegionKey}
               onZoomChange={setMapZoom}
+              flyTo={flyTo}
             />
           )}
 
