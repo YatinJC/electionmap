@@ -208,21 +208,23 @@ export async function fetchGoogleCivicElections(): Promise<NormalizedElection[]>
       if (!stateFips) continue;
 
       for (const contest of contests) {
-        if (!contest.office || !contest.candidates?.length) continue;
+        // Use office name, or fall back to district name, or skip
+        const officeName = contest.office || contest.district?.name;
+        if (!officeName) continue;
 
         const level = mapLevel(contest.level, contest.roles);
 
         elections.push({
-          office: contest.office,
+          office: officeName,
           level,
-          district: contest.district?.name || `${stateAbbr} ${contest.office}`,
+          district: contest.district?.name || `${stateAbbr} ${officeName}`,
           date: election.electionDay,
           regionType: "state",
           regionId: stateFips,
-          candidates: contest.candidates.map((c) => ({
+          candidates: (contest.candidates || []).map((c) => ({
             name: c.name,
             party: normalizeParty(c.party),
-            incumbent: false, // Google Civic doesn't provide incumbency
+            incumbent: false,
           })),
         });
       }
