@@ -80,6 +80,10 @@ function officeNamesMatch(a: string, b: string): boolean {
 type ExistingElection = {
   id: string;
   office: string;
+  level: string;
+  region_type: string;
+  region_id: string;
+  date: string;
   description: string | null;
   why_it_matters: string | null;
   why_it_matters_source: string | null;
@@ -98,10 +102,21 @@ async function upsertElections(
   // ── Phase 1: Pre-fetch all existing elections in bulk ───────────
   // One query instead of one per election.
   console.log(`  Loading existing elections from DB...`);
-  const { data: allExisting } = await supabase
-    .from("elections")
-    .select("id, office, level, region_type, region_id, date, description, why_it_matters, why_it_matters_source")
-    .eq("status", "active");
+  // Supabase returns max 1000 rows by default — paginate to get all
+  const allExisting: ExistingElection[] = [];
+  let page = 0;
+  const PAGE_SIZE = 1000;
+  while (true) {
+    const { data } = await supabase
+      .from("elections")
+      .select("id, office, level, region_type, region_id, date, description, why_it_matters, why_it_matters_source")
+      .eq("status", "active")
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
+    if (!data || data.length === 0) break;
+    allExisting.push(...data);
+    if (data.length < PAGE_SIZE) break;
+    page++;
+  }
 
   // Build a lookup index: key → existing election
   const existingIndex = new Map<string, ExistingElection>();

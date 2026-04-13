@@ -93,7 +93,7 @@ export async function GET(request: NextRequest) {
     query = query.in("level", levels);
   }
 
-  const { data, error } = await query.order("date").order("level");
+  const { data, error } = await query.order("date").order("level").limit(500);
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

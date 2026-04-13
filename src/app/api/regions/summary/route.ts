@@ -22,28 +22,41 @@ export async function GET(request: NextRequest) {
   const todayStr = now.toISOString().split("T")[0];
   const cutoffStr = cutoff.toISOString().split("T")[0];
 
-  let query = supabase
-    .from("elections")
-    .select("region_type, region_id")
-    .eq("status", "active")
-    .gte("date", todayStr)
-    .lte("date", cutoffStr);
+  // Paginate to get ALL elections — Supabase defaults to 1,000 rows max
+  const allRows: { region_type: string; region_id: string }[] = [];
+  let page = 0;
+  const PAGE_SIZE = 1000;
 
-  if (levels && levels.length > 0) {
-    query = query.in("level", levels);
-  }
+  while (true) {
+    let query = supabase
+      .from("elections")
+      .select("region_type, region_id")
+      .eq("status", "active")
+      .gte("date", todayStr)
+      .lte("date", cutoffStr)
+      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
 
-  const { data, error } = await query;
+    if (levels && levels.length > 0) {
+      query = query.in("level", levels);
+    }
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const { data, error } = await query;
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    if (!data || data.length === 0) break;
+    allRows.push(...data);
+    if (data.length < PAGE_SIZE) break;
+    page++;
   }
 
   const stateSet = new Set<string>();
   const countySet = new Set<string>();
   const districtSet = new Set<string>();
 
-  for (const r of data ?? []) {
+  for (const r of allRows) {
     if (r.region_type === "state") {
       stateSet.add(r.region_id);
     } else if (r.region_type === "county") {
