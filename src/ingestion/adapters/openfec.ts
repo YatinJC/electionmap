@@ -76,12 +76,14 @@ async function fetchAllPages(
     const data = await res.json();
     results.push(...data.results);
     totalPages = data.pagination.pages;
+    process.stdout.write(`\r    Page ${page}/${totalPages} (${results.length} candidates so far)`);
     page++;
 
     // Rate limit: DEMO_KEY allows 1000 requests/hour, ~20/minute effective
     await new Promise((r) => setTimeout(r, getApiKey() === "DEMO_KEY" ? 3500 : 500));
   }
 
+  console.log(); // newline after progress
   return results;
 }
 

@@ -109,15 +109,17 @@ export async function fetchStateLegislatureElections(): Promise<NormalizedElecti
   console.log(`  Found ${jurisdictions.length} states`);
 
   const elections: NormalizedElection[] = [];
+  const totalStates = jurisdictions.length;
 
-  for (const jurisdiction of jurisdictions) {
+  for (let si = 0; si < jurisdictions.length; si++) {
+    const jurisdiction = jurisdictions[si];
     const stateAbbr = stateFromJurisdiction(jurisdiction.id);
     if (!stateAbbr) continue;
     const stateFips = STATE_FIPS[stateAbbr];
     if (!stateFips) continue;
 
     const stateUpper = stateAbbr.toUpperCase();
-    console.log(`  ${jurisdiction.name}...`);
+    console.log(`  [${si + 1}/${totalStates}] ${jurisdiction.name}...`);
 
     // 2. Fetch upper chamber (Senate)
     const senators = await fetchPeople("upper", jurisdiction.id);

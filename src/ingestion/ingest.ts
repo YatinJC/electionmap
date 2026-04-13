@@ -131,7 +131,12 @@ async function upsertElections(
   let updated = 0;
   let skipped = 0;
 
-  for (const election of elections) {
+  const total = elections.length;
+  for (let i = 0; i < elections.length; i++) {
+    const election = elections[i];
+    if (i % 50 === 0 || i === total - 1) {
+      process.stdout.write(`\r  Processing ${i + 1}/${total}...`);
+    }
     const existing = await findExistingElection(supabase, election);
 
     let electionId: string;
@@ -234,6 +239,7 @@ async function upsertElections(
     );
   }
 
+  console.log(`\n  Done: ${created} created, ${updated} updated, ${skipped} skipped`);
   return { created, updated, skipped };
 }
 
