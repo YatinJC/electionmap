@@ -61,20 +61,17 @@ export async function GET(request: NextRequest) {
   // Build query using Supabase's parameterized methods where possible.
   // The .or() filter still uses string syntax but inputs are now validated
   // to be numeric-only FIPS codes, preventing injection.
+  // Always include statewide elections for this state.
+  // The frontend resolves the exact county and district at the mouse position
+  // via point-in-polygon, so only the relevant local elections are fetched.
   const conditions: string[] = [
     `and(region_type.eq.state,region_id.eq.${stateId})`,
   ];
-
-  if (countyId || districtId) {
-    if (countyId) {
-      conditions.push(`and(region_type.eq.county,region_id.eq.${countyId})`);
-    }
-    if (districtId) {
-      conditions.push(`and(region_type.eq.congressional_district,region_id.eq.${districtId})`);
-    }
-  } else {
-    conditions.push(`and(region_type.eq.congressional_district,region_id.like.${stateId}*)`);
-    conditions.push(`and(region_type.eq.county,region_id.like.${stateId}*)`);
+  if (countyId) {
+    conditions.push(`and(region_type.eq.county,region_id.eq.${countyId})`);
+  }
+  if (districtId) {
+    conditions.push(`and(region_type.eq.congressional_district,region_id.eq.${districtId})`);
   }
 
   let query = supabase
