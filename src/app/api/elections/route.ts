@@ -6,8 +6,9 @@ import { createClient } from "@/utils/supabase/server";
 // ── Input validation ──────────────────────────────────────────────
 
 function isValidFips(code: string | null): code is string {
-  // FIPS codes are 2-5 digit numeric strings
-  return code !== null && /^\d{2,5}$/.test(code);
+  // FIPS codes are 2-5 character alphanumeric strings
+  // (Alaska uses letter-based state senate district IDs like "0200I")
+  return code !== null && /^[0-9A-Za-z]{2,5}$/.test(code);
 }
 
 const VALID_LEVELS = new Set([
