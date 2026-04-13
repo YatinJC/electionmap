@@ -6,7 +6,8 @@
  * since there's no timeout constraint when running locally.
  */
 
-import "dotenv/config";
+import { config } from "dotenv";
+config({ path: ".env.local" });
 import { generateMissingDescriptions } from "./generate-descriptions";
 
 const CLI_BATCH_LIMIT = 500;

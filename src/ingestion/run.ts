@@ -8,7 +8,8 @@
  *   npm run ingest -- google-civic
  */
 
-import "dotenv/config";
+import { config } from "dotenv";
+config({ path: ".env.local" });
 import { runIngestion, type Adapter } from "./ingest";
 
 const adapterArg = process.argv[2] as Adapter | undefined;
