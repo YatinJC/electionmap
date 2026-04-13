@@ -19,307 +19,212 @@ ElectionMap makes every election discoverable. Anyone can zoom into any part of 
 ## Architecture Overview
 
 ```
-Phase 1: Database + API          ──┐
-  (foundation - blocks everything) │
-                                   ▼
-Phase 2: API Ingestion  ───┐  Phase 3: AI "Why It Matters"
-  (real election data)      │    (can run in parallel)
-                            ▼         │
-                    Phase 4: Volunteer System
-                      (Wikipedia-style editing)
-                            │
-                            ▼
-                    Phase 5: AI Scrapers
-                      (local govt websites)
+Phase 1: Database + API           ✅ DONE
+Phase 2: API Ingestion            ✅ DONE
+Phase 3: AI "Why It Matters"      ✅ DONE
+Phase 4: Volunteer System            NOT STARTED
+Phase 5: AI Scrapers                 NOT STARTED
 ```
 
 ---
 
-## Phase 1 — Database + API Layer
+## Phase 1 — Database + API Layer ✅
 
-**Status:** Not started
-**Goal:** Replace hardcoded mock data with a real database and API. The frontend should work identically but pull from the DB instead of a static file.
+**Status:** Complete
 
-### Tech Stack
-- **Database:** Supabase (PostgreSQL) — free tier: 500MB storage, built-in auth
-- **ORM:** Drizzle ORM — lightweight, TypeScript-native, no binary bloat
-- **API:** Next.js Route Handlers (App Router)
+### What's Built
+- **Supabase** PostgreSQL database with elections, candidates, data_sources, and election_sources tables
+- **Supabase JS client** connecting over HTTPS (avoids IPv4/IPv6 issues with direct Postgres)
+- **API routes:**
+  - `GET /api/elections?stateId=XX&countyId=XXXXX&districtId=XXXX&months=N&levels=federal,state` — elections for a location with time window and level filtering
+  - `GET /api/regions/summary?months=N&levels=federal,state` — FIPS codes with elections (for map highlighting)
+- **Database-level dedup constraint:** unique index on `(level, region_type, region_id, date, office)` for active elections
+- **Row Level Security:** public read access, service role for writes
+- **Seed script:** `npm run db:seed` populates from mock data
 
 ### Database Schema
 
-**`elections`**
-| Column | Type | Notes |
-|--------|------|-------|
-| id | UUID | Primary key |
-| office | TEXT | e.g. "Public Service Commissioner, District 3" |
-| level | TEXT | federal, state, county, municipal, special_district |
-| district | TEXT | Human-readable district name |
-| date | DATE | Election date |
-| description | TEXT | What this office does |
-| why_it_matters | TEXT | Plain-language impact explanation |
-| why_it_matters_source | TEXT | 'manual', 'ai_generated', 'volunteer' |
-| region_type | TEXT | 'nation', 'state', 'county' |
-| region_id | TEXT | FIPS code |
-| status | TEXT | 'active', 'archived', 'draft' |
-| created_at | TIMESTAMPTZ | |
-| updated_at | TIMESTAMPTZ | |
+**`elections`** — office, level, district, date, description, why_it_matters, why_it_matters_source, region_type (state/county/congressional_district), region_id (FIPS), status
 
-**`candidates`**
-| Column | Type | Notes |
-|--------|------|-------|
-| id | UUID | Primary key |
-| election_id | UUID | FK → elections |
-| name | TEXT | |
-| party | TEXT | |
-| incumbent | BOOLEAN | |
-| website | TEXT | |
-| description | TEXT | |
+**`candidates`** — name, party, incumbent, linked to elections via election_id
 
-**`data_sources`**
-| Column | Type | Notes |
-|--------|------|-------|
-| id | UUID | Primary key |
-| name | TEXT | e.g. 'google_civic', 'volunteer' |
-| source_type | TEXT | 'api', 'scraper', 'volunteer' |
-| reliability | INT | 0–100 trust score |
-| last_synced_at | TIMESTAMPTZ | |
-| config | JSONB | API keys, URLs, scraper params |
+**`data_sources`** — name, source_type (api/scraper/volunteer), reliability score (0-100)
 
-**`election_sources`** (junction — tracks provenance)
-| Column | Type | Notes |
-|--------|------|-------|
-| id | UUID | Primary key |
-| election_id | UUID | FK → elections |
-| source_id | UUID | FK → data_sources |
-| external_id | TEXT | ID in the source system |
-| raw_data | JSONB | Original API response |
-| confidence | INT | 0–100 |
-| fetched_at | TIMESTAMPTZ | |
-
-### API Endpoints
-- `GET /api/elections?stateId=XX&countyId=XXXXX` — elections for a location
-- `GET /api/regions/summary` — FIPS codes with elections (for map coloring, cached aggressively)
-
-### Key Decisions
-- **FIPS codes** as the geographic key — standard US identifier, encodes the state→county hierarchy naturally (state FIPS = first 2 digits of county FIPS)
-- **Drizzle over Prisma** — no binary bloat, better Vercel cold starts, pure TypeScript
-- **Supabase over Neon+Clerk** — bundles auth (needed for Phase 4) in one service
+**`election_sources`** — junction table tracking which source provided each election's data
 
 ---
 
-## Phase 2 — Data Ingestion from Free APIs
+## Phase 2 — Data Ingestion ✅
 
-**Status:** Not started
-**Goal:** Replace mock data with real election data from public APIs.
-**Depends on:** Phase 1
+**Status:** Complete — 785+ elections, 4,000+ candidates from real APIs
 
-### Data Sources (priority order)
+### Data Sources (active)
 
-1. **Google Civic Information API** (free with API key)
-   - Best structured source for federal + state races
-   - `elections` endpoint: lists upcoming elections
-   - `voterinfo` endpoint: ballot info by address
-   - Limitation: data only available ~2–4 weeks before each election
+| Source | Coverage | Elections | Status |
+|--------|----------|-----------|--------|
+| **OpenFEC** | All 2026 Senate + House candidates | ~502 | ✅ Working |
+| **Open States** | State legislature (incumbents) | ~290 (3 states so far, rate-limited) | ✅ Working, needs full run |
+| **Google Civic** | Active elections near election day | 0 (no active elections yet) | ✅ Adapter ready |
 
-2. **civicAPI.org** (free, no key)
-   - Claims coverage down to school board level
-   - Needs real-world testing to verify completeness
+### Data Sources (pending — need partnership/payment)
 
-3. **Open States** (free)
-   - State legislature data
+| Source | Coverage | Status |
+|--------|----------|--------|
+| **BallotReady** | Every race down to school board, candidate bios, endorsements | Reaching out |
+| **Democracy Works** | Federal → school board for jurisdictions 5,000+ | Reaching out |
+| **Ballotpedia** | Comprehensive all levels, $600 CSV dump or paid API | Considering |
 
-4. **Democracy Works / BallotReady** (may require partnership)
-   - Most comprehensive down-ballot coverage
-   - Worth pursuing for deeper local data
+### Ingestion Architecture
+- **Adapter pattern:** each source gets a module in `src/ingestion/adapters/` that fetches and normalizes data
+- **Fuzzy dedup:** matches elections on `(level, region_type, region_id, date)` with normalized office name comparison to handle cross-source naming differences
+- **Human data preserved:** API updates never overwrite manually-written descriptions or "why it matters"
+- **Provenance tracking:** every election links back to which source provided it via `election_sources`
+- **Progress logging:** shows page counts during fetch and election counter during upsert
 
-### Adapter Pattern
+### Automation
+- **Vercel Cron:** `GET /api/cron/sync-elections` runs nightly at 6am UTC
+  - Phase 1: ingests from all three API sources
+  - Phase 2: generates AI descriptions for new elections
+  - Protected by `CRON_SECRET` env var
+- **CLI:** `npm run ingest` (all) or `npm run ingest -- openfec|openstates|google-civic`
 
-Each data source gets a module in `src/ingestion/adapters/` that implements:
-
-```typescript
-interface IngestionAdapter {
-  sourceId: string;
-  fetch(): Promise<RawElectionData[]>;
-  mapToElection(raw: RawElectionData): Partial<Election>;
-}
-```
-
-### Data Reconciliation
-
-When two sources report the same election (matched on `office + region + date`):
-- Higher-reliability source wins for factual fields (candidates, dates)
-- Human-written descriptions are preserved over API data
-- Conflicts on factual fields are flagged for manual review — never silently overwritten
-- If a source stops reporting an election, mark `possibly_stale` for review (don't auto-delete)
-
-### Scheduling
-- Vercel Cron (free tier: 2 jobs, daily)
-- Nightly sync calls each adapter in sequence
-- Route: `POST /api/cron/sync-elections`
+### Time-Based Filtering
+- Elections automatically drop off the map after their date passes
+- Adjustable time window in the UI: 1 month, 3 months, 6 months, 1 year, 2 years
+- Both API routes respect the `months` parameter
 
 ---
 
-## Phase 3 — AI-Generated "Why It Matters"
+## Phase 3 — AI-Generated Descriptions ✅
 
-**Status:** Not started
-**Goal:** Auto-generate placeholder descriptions for elections that lack human-written "why it matters" content.
-**Depends on:** Phase 1
-**Can run in parallel with:** Phase 2
+**Status:** Complete — 113+ elections have AI-generated content, system ready for full run
 
-### Approach
-- When an election has no `why_it_matters`, queue it for AI generation
-- Prompt includes: office name, level, region, population, candidates, any existing description
-- Generated text stored with `why_it_matters_source = 'ai_generated'`
-- UI shows: *"AI-generated — help us improve this"* linking to the edit flow (Phase 4)
-
-### Tech
-- Anthropic Claude API (`claude-sonnet-4-20250514`) via `@anthropic-ai/sdk`
-- Batch job: `POST /api/cron/generate-descriptions`
-- Rate limited to ~50 per run
+### What's Built
+- **Claude Sonnet** generates "What is this?" and "Why it matters" for elections missing descriptions
+- **Nonpartisan, region-specific:** connects to real daily-life impacts (utility bills, school funding, road conditions)
+- **Batch limits:** 500 for CLI (`npm run generate-descriptions`), 100 for nightly cron
+- **Smart skip logic:** never overwrites human-written content (`manual` or `volunteer` source)
+- **UI label:** elections with AI content show "AI-generated — volunteer editors can improve this"
+- **Integrated into cron:** runs automatically after each data ingestion
 
 ### Cost
-- ~300 tokens per generation
-- 10,000 elections ≈ $1.50 total
-- Essentially free at any reasonable scale
+- ~$0.01 per election with Claude Sonnet
+- Full backlog of 785 elections ≈ $7.85
 
 ---
 
 ## Phase 4 — Volunteer / Community System
 
 **Status:** Not started
-**Goal:** Allow users to sign up, submit new elections, edit existing data, and have edits go through a review process. Wikipedia-style revision history.
-**Depends on:** Phase 1, benefits from Phase 2
+**Goal:** Wikipedia-style editing — users can sign up, submit new elections, edit descriptions, with review queue and revision history.
 
-### Auth
+### Planned
 - Supabase Auth (email + GitHub OAuth)
 - Roles: contributor, reviewer, admin
-
-### Additional Tables
-
-**`users`**
-| Column | Type | Notes |
-|--------|------|-------|
-| id | UUID | Matches Supabase auth.users.id |
-| display_name | TEXT | |
-| role | TEXT | contributor, reviewer, admin |
-| reputation | INT | Earned through approved edits |
-
-**`revisions`** (field-level edit tracking)
-| Column | Type | Notes |
-|--------|------|-------|
-| id | UUID | Primary key |
-| election_id | UUID | FK → elections |
-| user_id | UUID | FK → users |
-| field_changed | TEXT | e.g. 'description', 'why_it_matters' |
-| old_value | JSONB | |
-| new_value | JSONB | |
-| status | TEXT | pending, approved, rejected |
-| reviewed_by | UUID | FK → users |
-| comment | TEXT | Reviewer's note |
-
-**`election_submissions`** (new elections proposed by volunteers)
-| Column | Type | Notes |
-|--------|------|-------|
-| id | UUID | Primary key |
-| user_id | UUID | FK → users |
-| data | JSONB | Full election object as submitted |
-| status | TEXT | pending, approved, rejected |
-| created_election_id | UUID | Set when approved |
-
-### User Flow
-1. Anyone can browse the map without signing in
-2. Sign in to propose edits or submit new elections
-3. All edits go to a review queue
-4. Reviewers approve/reject with comments
-5. Full revision history visible on every election
-6. After N approved edits, contributors can be promoted to reviewer
-
-### Trust Model
-- API-sourced data has higher default trust than volunteer submissions
-- AI-generated content is clearly labeled and editable by anyone
-- Volunteer edits to "why it matters" are encouraged — that's the unique value
+- Field-level revision tracking (what changed, who, when)
+- Review queue for all edits
+- "Edit" button on election cards (visible when logged in)
+- Reputation system — approved edits earn trust
 
 ---
 
 ## Phase 5 — AI Scraping Agents
 
 **Status:** Not started
-**Goal:** For local elections not covered by any API, build scrapers that extract election info from county/city government websites.
-**Depends on:** Phase 2 (adapter pattern), Phase 4 (volunteer verification)
+**Goal:** For local elections not covered by any API, scrape county/city government websites using Playwright + Claude extraction.
 
-### Why This Is Last
-Scrapers are brittle. Government websites change layouts, go down, and have inconsistent formatting. The volunteer system (Phase 4) acts as the verification layer for scraped data.
-
-### Approach
-- Playwright loads county election board websites
-- Claude extracts structured election data from page HTML
-- Each scraper targets a specific jurisdiction
-
-### Scraper Config
-```
-src/ingestion/scrapers/
-  base-scraper.ts           -- Playwright + Claude extraction pipeline
-  targets/
-    fulton-county-ga.ts     -- URL, selectors, extraction prompt
-    harris-county-tx.ts
-    ...
-```
-
-Each target specifies:
-- URL(s) to scrape
-- Claude prompt describing what to extract
-- Mapping function to internal schema
-- Schedule (how often to re-check)
-
-### Deployment
-- Cannot run on Vercel (no Playwright support)
-- Options: GitHub Actions (free scheduled workflows), cheap VPS ($4/month), or Browserless.io
-- Pushes results to Supabase via the ingestion API
-
-### Trust
-- Scraped data gets a low reliability score
-- Flagged for volunteer verification before going live
-- "Unverified — sourced from [county website]" label in UI
+### Planned
+- Each scraper targets a specific jurisdiction's election board website
+- Claude extracts structured data from page HTML
+- Scraped data gets low reliability score, flagged for volunteer verification
+- Cannot run on Vercel — needs GitHub Actions or cheap VPS
+- Volunteer system (Phase 4) acts as verification layer
 
 ---
 
-## Deployment Architecture
+## Frontend Features
 
-```
-Vercel (free tier)
-├── Next.js app (frontend + API routes)
-├── Cron: /api/cron/sync-elections (daily)
-└── Cron: /api/cron/generate-descriptions (daily)
-
-Supabase (free tier)
-├── PostgreSQL database
-├── Auth (email + OAuth)
-└── Row Level Security (optional)
-
-External Services
-├── Google Civic API (free)
-├── civicAPI.org (free)
-├── Anthropic Claude API (pay-per-use, ~$0.15/10K elections)
-└── GitHub Actions or VPS (Phase 5 scrapers only)
-```
-
-**Cost at launch: $0/month** until meaningful traffic is reached.
-
----
-
-## Current Status
-
-### Completed
-- [x] Next.js 16 project with TypeScript + Tailwind
-- [x] Leaflet map with CARTO dark tiles
+### Map
+- [x] Leaflet + CARTO dark tiles (no labels)
 - [x] US state boundaries (Census TIGER/Line TopoJSON)
 - [x] US county boundaries with zoom-based reveal (zoom ≥ 7)
-- [x] Hover interaction — highlights region, shows elections in side panel
-- [x] Click-to-lock — pin a region to read details while moving the map
-- [x] Mock data for 7 states, 9 counties, 20 elections
-- [x] Election cards with "What is this?" and "Why it matters" sections
-- [x] Color-coded election levels (federal, state, county, municipal, special district)
-- [x] Mobile-responsive layout
+- [x] 118th Congress district boundaries (dashed outlines, visual overlay)
+- [x] Point-in-polygon lookup (Turf.js) finds congressional district at mouse position
+- [x] Single unified color system — cyan at 3 intensities, party-neutral
+- [x] Counties = solid lines, districts = dashed lines (distinguished by style, not color)
 
-### Next Up
-- [ ] Phase 1: Set up Supabase + Drizzle, migrate mock data to DB
+### Interaction
+- [x] Hover to preview elections (debounced, imperative style updates for performance)
+- [x] Click to lock/pin selection (scroll panel, move map while reading)
+- [x] Escape or click to unlock
+- [x] Hovering a state at zoomed-out level shows ALL elections in that state (not just statewide)
+
+### Panel
+- [x] Elections grouped by level with colored section headers
+- [x] "What is this?" / "Why it matters" / "Candidates" sections with distinct consistent colors
+- [x] AI-generated content label
+- [x] "Description coming soon" placeholder for elections awaiting AI generation
+- [x] Empty state with how-to-use guide, election levels legend, and card section guide
+
+### Filters
+- [x] Time window selector (1mo / 3mo / 6mo / 1yr / 2yr)
+- [x] Election level toggles (Federal / State / County / Municipal / Special)
+- [x] Filters update both map highlights and panel content
+
+### Legend
+- [x] Map legend overlay (bottom-left) showing boundary types and highlight meanings
+- [x] Adapts to zoom level — county/district entries appear when zoomed in
+
+### Performance
+- [x] Imperative `setStyle()` updates instead of GeoJSON re-renders
+- [x] Only update the 2 affected features on hover change (not all 3,231)
+- [x] Stable event bindings via refs (no stale closures, no rebinding)
+- [x] Point-in-polygon result caching (~1km threshold)
+- [x] 16ms hover debounce (one animation frame)
+- [x] Memoized FeatureCollection data (GeoJSON mounts once)
+- [x] Client-side election cache keyed by region + filters
+
+---
+
+## Tech Stack
+
+| Layer | Tech | Why |
+|-------|------|-----|
+| Framework | Next.js 16 (App Router) | SSR + API routes in one project |
+| Frontend | React 19, Tailwind 4, Leaflet | Fast, dark theme, zoomable map |
+| Database | Supabase (PostgreSQL) | Free tier, built-in auth for Phase 4 |
+| Geo data | Census TIGER/Line TopoJSON | Official US boundaries, free |
+| Spatial | Turf.js | Point-in-polygon for district lookup |
+| AI | Anthropic Claude Sonnet | Description generation |
+| Data | OpenFEC, Open States, Google Civic | Free election data APIs |
+| Deployment | Vercel (planned) | Free tier, cron support |
+
+---
+
+## Environment Variables
+
+```
+NEXT_PUBLIC_SUPABASE_URL=         # Supabase project URL
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=  # Supabase anon/publishable key
+SUPABASE_SERVICE_ROLE_KEY=        # Supabase secret key (server-side only)
+OPENFEC_API_KEY=                  # FEC API key (free at api.open.fec.gov)
+OPEN_STATES_API_KEY=              # Open States key (free at openstates.org)
+GOOGLE_CIVIC_API_KEY=             # Google Civic API key (free via Google Cloud)
+ANTHROPIC_API_KEY=                # Claude API key (for AI descriptions)
+CRON_SECRET=                      # Protects the cron endpoint in production
+```
+
+---
+
+## CLI Commands
+
+| Command | What it does |
+|---------|-------------|
+| `npm run dev` | Start development server |
+| `npm run build` | Production build |
+| `npm run ingest` | Run all data ingestion adapters |
+| `npm run ingest -- openfec` | Ingest only federal election data |
+| `npm run ingest -- openstates` | Ingest only state legislature data |
+| `npm run ingest -- google-civic` | Ingest only active Google Civic elections |
+| `npm run generate-descriptions` | AI-generate missing descriptions (batch of 500) |
+| `npm run db:seed` | Seed database with mock election data |
