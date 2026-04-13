@@ -85,43 +85,6 @@ type ExistingElection = {
   why_it_matters_source: string | null;
 };
 
-async function findExistingElection(
-  supabase: SupabaseClient,
-  election: NormalizedElection
-): Promise<ExistingElection | null> {
-  // First: exact match on all fields including office
-  const { data: exact } = await supabase
-    .from("elections")
-    .select("id, office, description, why_it_matters, why_it_matters_source")
-    .eq("office", election.office)
-    .eq("region_type", election.regionType)
-    .eq("region_id", election.regionId)
-    .eq("date", election.date)
-    .limit(1)
-    .maybeSingle();
-
-  if (exact) return exact;
-
-  // Second: fuzzy match — same region/date/level, compare office names
-  const { data: candidates } = await supabase
-    .from("elections")
-    .select("id, office, description, why_it_matters, why_it_matters_source")
-    .eq("level", election.level)
-    .eq("region_type", election.regionType)
-    .eq("region_id", election.regionId)
-    .eq("date", election.date);
-
-  if (!candidates || candidates.length === 0) return null;
-
-  // Find the best fuzzy match
-  for (const candidate of candidates) {
-    if (officeNamesMatch(election.office, candidate.office)) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
 
 async function upsertElections(
   supabase: SupabaseClient,
@@ -132,83 +95,149 @@ async function upsertElections(
   let updated = 0;
   let skipped = 0;
 
-  const total = elections.length;
-  for (let i = 0; i < elections.length; i++) {
-    const election = elections[i];
-    if (i % 10 === 0 || i === total - 1) {
-      process.stdout.write(`\r  Processing ${i + 1}/${total} (${created} new, ${updated} updated)...`);
+  // ── Phase 1: Pre-fetch all existing elections in bulk ───────────
+  // One query instead of one per election.
+  console.log(`  Loading existing elections from DB...`);
+  const { data: allExisting } = await supabase
+    .from("elections")
+    .select("id, office, level, region_type, region_id, date, description, why_it_matters, why_it_matters_source")
+    .eq("status", "active");
+
+  // Build a lookup index: key → existing election
+  const existingIndex = new Map<string, ExistingElection>();
+  for (const e of allExisting ?? []) {
+    // Index by exact match key
+    const exactKey = `${e.level}|${e.region_type}|${e.region_id}|${e.date}|${e.office}`;
+    existingIndex.set(exactKey, e);
+    // Also index by fuzzy key (without office) for cross-source matching
+    const fuzzyKey = `${e.level}|${e.region_type}|${e.region_id}|${e.date}`;
+    if (!existingIndex.has(fuzzyKey)) {
+      existingIndex.set(fuzzyKey, e);
     }
-    const existing = await findExistingElection(supabase, election);
+  }
+  console.log(`  Found ${allExisting?.length ?? 0} existing elections`);
 
-    let electionId: string;
+  // ── Phase 2: Classify each incoming election ────────────────────
+  const toCreate: NormalizedElection[] = [];
+  const toUpdate: { election: NormalizedElection; existingId: string }[] = [];
 
-    if (existing) {
-      electionId = existing.id;
+  for (const election of elections) {
+    // Try exact match first
+    const exactKey = `${election.level}|${election.regionType}|${election.regionId}|${election.date}|${election.office}`;
+    let match = existingIndex.get(exactKey);
 
-      // Update office name and district (API data is authoritative for these)
-      // but PRESERVE human-written descriptions
-      await supabase
-        .from("elections")
-        .update({
-          office: election.office,
-          district: election.district,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", electionId);
+    // Try fuzzy match
+    if (!match) {
+      const candidates = (allExisting ?? []).filter(
+        (e) => e.level === election.level && e.region_type === election.regionType && e.region_id === election.regionId && e.date === election.date
+      );
+      match = candidates.find((c) => officeNamesMatch(election.office, c.office));
+    }
 
-      updated++;
+    if (match) {
+      toUpdate.push({ election, existingId: match.id });
     } else {
-      const { data: inserted, error } = await supabase
-        .from("elections")
-        .insert({
-          office: election.office,
-          level: election.level,
-          district: election.district,
-          date: election.date,
+      toCreate.push(election);
+    }
+  }
+
+  console.log(`  To create: ${toCreate.length}, To update: ${toUpdate.length}`);
+
+  // ── Phase 3: Batch insert new elections ─────────────────────────
+  const BATCH_SIZE = 50;
+
+  for (let i = 0; i < toCreate.length; i += BATCH_SIZE) {
+    const batch = toCreate.slice(i, i + BATCH_SIZE);
+    process.stdout.write(`\r  Inserting ${Math.min(i + BATCH_SIZE, toCreate.length)}/${toCreate.length}...`);
+
+    const { data: inserted, error } = await supabase
+      .from("elections")
+      .insert(
+        batch.map((e) => ({
+          office: e.office,
+          level: e.level,
+          district: e.district,
+          date: e.date,
           description: null,
           why_it_matters: null,
           why_it_matters_source: null,
-          region_type: election.regionType,
-          region_id: election.regionId,
+          region_type: e.regionType,
+          region_id: e.regionId,
           status: "active",
-        })
-        .select()
-        .single();
-
-      if (error) {
-        skipped++;
-        continue;
-      }
-      electionId = inserted!.id;
-      created++;
-    }
-
-    // Refresh candidates — bulk delete and re-insert in one go
-    if (election.candidates.length > 0) {
-      await supabase.from("candidates").delete().eq("election_id", electionId);
-      await supabase.from("candidates").insert(
-        election.candidates.map((c) => ({
-          election_id: electionId,
-          name: c.name,
-          party: c.party,
-          incumbent: c.incumbent,
         }))
-      );
+      )
+      .select("id");
+
+    if (error || !inserted) {
+      skipped += batch.length;
+      continue;
     }
 
-    // Track provenance
-    await supabase.from("election_sources").upsert(
-      {
-        election_id: electionId,
-        source_id: sourceId,
-        confidence: 90,
-        fetched_at: new Date().toISOString(),
-      },
-      { onConflict: "election_id,source_id" }
-    );
+    // Insert candidates for new elections
+    const candidateRows: { election_id: string; name: string; party: string; incumbent: boolean }[] = [];
+    const provenanceRows: { election_id: string; source_id: string; confidence: number; fetched_at: string }[] = [];
+
+    for (let j = 0; j < inserted.length; j++) {
+      const elId = inserted[j].id;
+      const el = batch[j];
+      for (const c of el.candidates) {
+        candidateRows.push({ election_id: elId, name: c.name, party: c.party, incumbent: c.incumbent });
+      }
+      provenanceRows.push({ election_id: elId, source_id: sourceId, confidence: 90, fetched_at: new Date().toISOString() });
+    }
+
+    if (candidateRows.length > 0) {
+      await supabase.from("candidates").insert(candidateRows);
+    }
+    if (provenanceRows.length > 0) {
+      await supabase.from("election_sources").upsert(provenanceRows, { onConflict: "election_id,source_id" });
+    }
+
+    created += inserted.length;
   }
 
-  console.log(`\n  Done: ${created} created, ${updated} updated, ${skipped} skipped`);
+  if (toCreate.length > 0) console.log();
+
+  // ── Phase 4: Batch update existing elections ────────────────────
+  for (let i = 0; i < toUpdate.length; i += BATCH_SIZE) {
+    const batch = toUpdate.slice(i, i + BATCH_SIZE);
+    process.stdout.write(`\r  Updating ${Math.min(i + BATCH_SIZE, toUpdate.length)}/${toUpdate.length}...`);
+
+    // Updates must be done per-row (Supabase doesn't support bulk update with different values)
+    // but we can parallelize them
+    await Promise.all(
+      batch.map(async ({ election, existingId }) => {
+        await supabase
+          .from("elections")
+          .update({ office: election.office, district: election.district, updated_at: new Date().toISOString() })
+          .eq("id", existingId);
+
+        // Refresh candidates
+        if (election.candidates.length > 0) {
+          await supabase.from("candidates").delete().eq("election_id", existingId);
+          await supabase.from("candidates").insert(
+            election.candidates.map((c) => ({
+              election_id: existingId,
+              name: c.name,
+              party: c.party,
+              incumbent: c.incumbent,
+            }))
+          );
+        }
+
+        await supabase.from("election_sources").upsert(
+          { election_id: existingId, source_id: sourceId, confidence: 90, fetched_at: new Date().toISOString() },
+          { onConflict: "election_id,source_id" }
+        );
+      })
+    );
+
+    updated += batch.length;
+  }
+
+  if (toUpdate.length > 0) console.log();
+
+  console.log(`  Done: ${created} created, ${updated} updated, ${skipped} skipped`);
   return { created, updated, skipped };
 }
 
