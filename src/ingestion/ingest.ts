@@ -134,8 +134,8 @@ async function upsertElections(
   const total = elections.length;
   for (let i = 0; i < elections.length; i++) {
     const election = elections[i];
-    if (i % 50 === 0 || i === total - 1) {
-      process.stdout.write(`\r  Processing ${i + 1}/${total}...`);
+    if (i % 10 === 0 || i === total - 1) {
+      process.stdout.write(`\r  Processing ${i + 1}/${total} (${created} new, ${updated} updated)...`);
     }
     const existing = await findExistingElection(supabase, election);
 
@@ -182,49 +182,17 @@ async function upsertElections(
       created++;
     }
 
-    // Refresh candidates from this source.
-    // Only replace candidates that came from this same source — preserve
-    // manually-added candidates by checking the election_sources table.
-    //
-    // For simplicity in v1: if this source previously provided candidates
-    // for this election, replace them. Otherwise, merge (add new ones).
-    const { data: existingSource } = await supabase
-      .from("election_sources")
-      .select("id")
-      .eq("election_id", electionId)
-      .eq("source_id", sourceId)
-      .maybeSingle();
-
-    if (existingSource) {
-      // This source has provided data before — safe to refresh candidates
-      await supabase.from("candidates").delete().eq("election_id", electionId);
-    }
-
+    // Refresh candidates — bulk delete and re-insert in one go
     if (election.candidates.length > 0) {
-      // Use upsert-like behavior: insert candidates, skip if name already exists
-      for (const c of election.candidates) {
-        const { data: existingCandidate } = await supabase
-          .from("candidates")
-          .select("id")
-          .eq("election_id", electionId)
-          .eq("name", c.name)
-          .maybeSingle();
-
-        if (!existingCandidate) {
-          await supabase.from("candidates").insert({
-            election_id: electionId,
-            name: c.name,
-            party: c.party,
-            incumbent: c.incumbent,
-          });
-        } else {
-          // Update existing candidate's info
-          await supabase
-            .from("candidates")
-            .update({ party: c.party, incumbent: c.incumbent })
-            .eq("id", existingCandidate.id);
-        }
-      }
+      await supabase.from("candidates").delete().eq("election_id", electionId);
+      await supabase.from("candidates").insert(
+        election.candidates.map((c) => ({
+          election_id: electionId,
+          name: c.name,
+          party: c.party,
+          incumbent: c.incumbent,
+        }))
+      );
     }
 
     // Track provenance
