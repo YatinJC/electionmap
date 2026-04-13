@@ -155,12 +155,19 @@ export async function generateMissingDescriptions(
   let skipped = 0;
   let errors = 0;
 
-  // Process in parallel batches of CONCURRENCY
-  const CONCURRENCY = 10;
+  // Process in parallel batches. Concurrency is configurable via env var
+  // to match your Anthropic API tier:
+  //   Tier 1 (new accounts): 50 req/min → CONCURRENCY=10, delay=12s/batch
+  //   Tier 2: 1000 req/min → CONCURRENCY=40, delay=3s/batch
+  //   Tier 3+: 2000+ req/min → CONCURRENCY=50, minimal delay
+  const CONCURRENCY = parseInt(process.env.AI_CONCURRENCY || "10", 10);
   const electionList = elections as ElectionRow[];
+
+  console.log(`  Concurrency: ${CONCURRENCY} (set AI_CONCURRENCY env var to change)`);
 
   for (let i = 0; i < electionList.length; i += CONCURRENCY) {
     const batch = electionList.slice(i, i + CONCURRENCY);
+    const batchStart = Date.now();
     process.stdout.write(`\r  Processing ${i + batch.length}/${electionList.length} (${generated} generated, ${errors} errors)...`);
 
     const results = await Promise.allSettled(
@@ -193,6 +200,15 @@ export async function generateMissingDescriptions(
       } else {
         errors++;
       }
+    }
+
+    // Rate limiting: ensure we don't exceed ~50 requests/minute (Tier 1)
+    // Each batch = CONCURRENCY requests. We need 60s / (50/CONCURRENCY) between batches.
+    const elapsed = Date.now() - batchStart;
+    const minBatchTime = (CONCURRENCY / 50) * 60 * 1000; // ms per batch to stay under 50 req/min
+    const delay = Math.max(0, minBatchTime - elapsed);
+    if (delay > 0) {
+      await new Promise((r) => setTimeout(r, delay));
     }
   }
 
