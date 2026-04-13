@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Election } from "@/types/elections";
 import { LEVEL_COLORS, SECTION_COLORS } from "@/lib/constants";
 
@@ -32,69 +33,94 @@ function LevelBadge({ level }: { level: Election["level"] }) {
 }
 
 function ElectionCard({ election }: { election: Election }) {
+  const [expanded, setExpanded] = useState(false);
+
   return (
-    <div className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-lg p-4 space-y-3 transition-all duration-200 hover:border-slate-600/80 hover:bg-slate-800/80">
-      <div className="flex items-start justify-between gap-2">
-        <h3 className="font-semibold text-white text-sm leading-tight">{election.office}</h3>
-        <LevelBadge level={election.level} />
-      </div>
-
-      <p className="text-slate-500 text-xs">
-        {election.district} &middot; {new Date(election.date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-      </p>
-
-      <div className="space-y-2">
-        {election.description && (
-          <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: SECTION_COLORS.whatIsThis }}>What is this?</h4>
-            <p className="text-slate-300 text-sm leading-relaxed">{election.description}</p>
-          </div>
-        )}
-        {election.whyItMatters && (
-          <div>
-            <h4 className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: SECTION_COLORS.whyItMatters }}>Why it matters</h4>
-            <p className="text-slate-200 text-sm leading-relaxed">{election.whyItMatters}</p>
-          </div>
-        )}
-        {!election.description && !election.whyItMatters && (
-          <p className="text-slate-500 text-xs italic">
-            Description coming soon.
+    <div className="bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-lg transition-all duration-200 hover:border-slate-600/80 hover:bg-slate-800/80">
+      {/* Header — always visible, clickable to toggle */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full text-left p-4 flex items-start justify-between gap-2"
+      >
+        <div className="flex-1 min-w-0">
+          <h3 className="font-semibold text-white text-sm leading-tight">{election.office}</h3>
+          <p className="text-slate-500 text-xs mt-1">
+            {election.district} &middot; {new Date(election.date).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
           </p>
-        )}
-      </div>
-
-      {/* AI-generated content label */}
-      {election.whyItMattersSource === "ai_generated" && (
-        <div className="flex items-center gap-1.5 bg-slate-700/40 border border-slate-600/30 rounded px-2.5 py-1.5">
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="flex-shrink-0">
-            <path d="M7 1L8.5 4.5L12 5L9.5 7.5L10 11L7 9.5L4 11L4.5 7.5L2 5L5.5 4.5L7 1Z" stroke="#94a3b8" strokeWidth="1.2" strokeLinejoin="round" />
+          {/* Candidate summary when collapsed */}
+          {!expanded && election.candidates.length > 0 && (
+            <p className="text-slate-500 text-xs mt-1.5 truncate">
+              {election.candidates.map((c) => c.name).join(", ")}
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <LevelBadge level={election.level} />
+          <svg
+            width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="#64748b" strokeWidth="1.5"
+            className={`transition-transform duration-200 ${expanded ? "rotate-180" : ""}`}
+          >
+            <path d="M3 4.5l3 3 3-3" />
           </svg>
-          <span className="text-slate-400 text-[11px]">
-            AI-generated &mdash; <span className="text-slate-500">volunteer editors can improve this</span>
-          </span>
+        </div>
+      </button>
+
+      {/* Expandable content */}
+      {expanded && (
+        <div className="px-4 pb-4 space-y-3">
+          <div className="space-y-2">
+            {election.description && (
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: SECTION_COLORS.whatIsThis }}>What is this?</h4>
+                <p className="text-slate-300 text-sm leading-relaxed">{election.description}</p>
+              </div>
+            )}
+            {election.whyItMatters && (
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: SECTION_COLORS.whyItMatters }}>Why it matters</h4>
+                <p className="text-slate-200 text-sm leading-relaxed">{election.whyItMatters}</p>
+              </div>
+            )}
+            {!election.description && !election.whyItMatters && (
+              <p className="text-slate-500 text-xs italic">
+                Description coming soon.
+              </p>
+            )}
+          </div>
+
+          {election.whyItMattersSource === "ai_generated" && (
+            <div className="flex items-center gap-1.5 bg-slate-700/40 border border-slate-600/30 rounded px-2.5 py-1.5">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="flex-shrink-0">
+                <path d="M7 1L8.5 4.5L12 5L9.5 7.5L10 11L7 9.5L4 11L4.5 7.5L2 5L5.5 4.5L7 1Z" stroke="#94a3b8" strokeWidth="1.2" strokeLinejoin="round" />
+              </svg>
+              <span className="text-slate-400 text-[11px]">
+                AI-generated &mdash; <span className="text-slate-500">volunteer editors can improve this</span>
+              </span>
+            </div>
+          )}
+
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: SECTION_COLORS.candidates }}>Candidates</h4>
+            <div className="space-y-1.5">
+              {election.candidates.map((candidate, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{
+                    backgroundColor:
+                      candidate.party === "Democratic" ? "#3b82f6" :
+                      candidate.party === "Republican" ? "#ef4444" :
+                      "#6b7280"
+                  }} />
+                  <span className="text-white">{candidate.name}</span>
+                  <span className="text-slate-500 text-xs">({candidate.party})</span>
+                  {candidate.incumbent && (
+                    <span className="text-xs bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded">Incumbent</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
-
-      <div>
-        <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: SECTION_COLORS.candidates }}>Candidates</h4>
-        <div className="space-y-1.5">
-          {election.candidates.map((candidate, i) => (
-            <div key={i} className="flex items-center gap-2 text-sm">
-              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{
-                backgroundColor:
-                  candidate.party === "Democratic" ? "#3b82f6" :
-                  candidate.party === "Republican" ? "#ef4444" :
-                  "#6b7280"
-              }} />
-              <span className="text-white">{candidate.name}</span>
-              <span className="text-slate-500 text-xs">({candidate.party})</span>
-              {candidate.incumbent && (
-                <span className="text-xs bg-slate-700 text-slate-300 px-1.5 py-0.5 rounded">Incumbent</span>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }
