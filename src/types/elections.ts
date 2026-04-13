@@ -12,8 +12,9 @@ export interface Election {
   level: "federal" | "state" | "county" | "municipal" | "special_district";
   district: string;
   date: string;
-  description: string;
-  whyItMatters: string;
+  description?: string | null;
+  whyItMatters?: string | null;
+  whyItMattersSource?: string | null; // "manual" | "ai_generated" | "volunteer" | null
   candidates: Candidate[];
   // Geographic binding — which regions does this election apply to?
   // "state:13" = Georgia (FIPS 13), "county:13121" = Fulton County, etc.

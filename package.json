@@ -12,9 +12,11 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx src/db/seed.ts",
     "db:studio": "drizzle-kit studio",
-    "ingest": "tsx src/ingestion/run.ts"
+    "ingest": "tsx src/ingestion/run.ts",
+    "generate-descriptions": "tsx src/lib/ai/run.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.88.0",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.0",
     "@turf/boolean-point-in-polygon": "^7.3.4",

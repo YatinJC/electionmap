@@ -44,15 +44,36 @@ function ElectionCard({ election }: { election: Election }) {
       </p>
 
       <div className="space-y-2">
-        <div>
-          <h4 className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: SECTION_COLORS.whatIsThis }}>What is this?</h4>
-          <p className="text-slate-300 text-sm leading-relaxed">{election.description}</p>
-        </div>
-        <div>
-          <h4 className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: SECTION_COLORS.whyItMatters }}>Why it matters</h4>
-          <p className="text-slate-200 text-sm leading-relaxed">{election.whyItMatters}</p>
-        </div>
+        {election.description && (
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: SECTION_COLORS.whatIsThis }}>What is this?</h4>
+            <p className="text-slate-300 text-sm leading-relaxed">{election.description}</p>
+          </div>
+        )}
+        {election.whyItMatters && (
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide mb-1" style={{ color: SECTION_COLORS.whyItMatters }}>Why it matters</h4>
+            <p className="text-slate-200 text-sm leading-relaxed">{election.whyItMatters}</p>
+          </div>
+        )}
+        {!election.description && !election.whyItMatters && (
+          <p className="text-slate-500 text-xs italic">
+            Description coming soon.
+          </p>
+        )}
       </div>
+
+      {/* AI-generated content label */}
+      {election.whyItMattersSource === "ai_generated" && (
+        <div className="flex items-center gap-1.5 bg-slate-700/40 border border-slate-600/30 rounded px-2.5 py-1.5">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className="flex-shrink-0">
+            <path d="M7 1L8.5 4.5L12 5L9.5 7.5L10 11L7 9.5L4 11L4.5 7.5L2 5L5.5 4.5L7 1Z" stroke="#94a3b8" strokeWidth="1.2" strokeLinejoin="round" />
+          </svg>
+          <span className="text-slate-400 text-[11px]">
+            AI-generated &mdash; <span className="text-slate-500">volunteer editors can improve this</span>
+          </span>
+        </div>
+      )}
 
       <div>
         <h4 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: SECTION_COLORS.candidates }}>Candidates</h4>

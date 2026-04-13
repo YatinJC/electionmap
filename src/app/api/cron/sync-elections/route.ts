@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runIngestion } from "@/ingestion/ingest";
+import { generateMissingDescriptions } from "@/lib/ai/generate-descriptions";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300; // 5 minutes max (Vercel Pro allows up to 300s)
+export const maxDuration = 300;
 
 /**
- * Cron endpoint for automated election data ingestion.
+ * Cron endpoint for automated election data sync + AI description generation.
  *
- * Called nightly by Vercel Cron. Can also be triggered manually:
+ * Runs nightly via Vercel Cron. Two phases:
+ *   1. Ingest election data from all API sources
+ *   2. Generate AI descriptions for any elections missing them
+ *
+ * Can also be triggered manually:
  *   curl http://localhost:3000/api/cron/sync-elections
- *
- * Protected by CRON_SECRET in production to prevent unauthorized triggers.
  */
 export async function GET(request: NextRequest) {
-  // Verify cron secret in production
   const cronSecret = process.env.CRON_SECRET;
   if (cronSecret) {
     const authHeader = request.headers.get("authorization");
@@ -23,17 +25,24 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const results = await runIngestion();
+    // Phase 1: Ingest from data sources
+    const ingestionResults = await runIngestion();
+
+    // Phase 2: Generate AI descriptions for new elections
+    const aiResults = await generateMissingDescriptions();
 
     const summary = {
       timestamp: new Date().toISOString(),
-      results,
-      totals: {
-        created: results.reduce((sum, r) => sum + r.created, 0),
-        updated: results.reduce((sum, r) => sum + r.updated, 0),
-        skipped: results.reduce((sum, r) => sum + r.skipped, 0),
-        errors: results.filter((r) => r.error).length,
+      ingestion: {
+        results: ingestionResults,
+        totals: {
+          created: ingestionResults.reduce((sum, r) => sum + r.created, 0),
+          updated: ingestionResults.reduce((sum, r) => sum + r.updated, 0),
+          skipped: ingestionResults.reduce((sum, r) => sum + r.skipped, 0),
+          errors: ingestionResults.filter((r) => r.error).length,
+        },
       },
+      aiGeneration: aiResults,
     };
 
     return NextResponse.json(summary);
