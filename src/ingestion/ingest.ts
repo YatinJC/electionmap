@@ -43,36 +43,83 @@ async function ensureSource(
   return data.id;
 }
 
-// ── Fuzzy matching ────────────────────────────────────────────────
+// ── Dedup matching ────────────────────────────────────────────────
 //
-// Different sources may name the same office slightly differently:
+// Different sources may name the same office differently:
 //   OpenFEC:      "U.S. Senator — GA"
 //   Google Civic: "U.S. Senate"
 //   Mock data:    "U.S. Senator"
 //
-// We normalize to a canonical key for dedup matching. The key is:
-//   (level, region_type, region_id, date)
-//
-// Office name is NOT part of the dedup key because it varies across sources.
-// Instead, we match on the combination of what level of government it is,
-// what geographic region it covers, and when the election is. This uniquely
-// identifies a race — there's only one Senate race per state per election date.
+// Strategy: first try exact match on office name. If no hit, try matching
+// on (level, region_type, region_id, date) and compare normalized office names.
+
+function normalizeOfficeName(office: string): string {
+  return office
+    .toLowerCase()
+    .replace(/[—–-]/g, " ")       // dashes
+    .replace(/\s+/g, " ")          // collapse whitespace
+    .replace(/\b(u\.s\.|us)\b/g, "us")
+    .replace(/\brepresentative\b/g, "rep")
+    .replace(/\bsenator\b/g, "senate")
+    .replace(/\bdistrict\b/g, "dist")
+    .replace(/\s*(,|\|)\s*/g, " ") // punctuation
+    .trim();
+}
+
+function officeNamesMatch(a: string, b: string): boolean {
+  const na = normalizeOfficeName(a);
+  const nb = normalizeOfficeName(b);
+  // Exact match after normalization
+  if (na === nb) return true;
+  // One contains the other (e.g. "us senate" matches "us senate ga")
+  if (na.includes(nb) || nb.includes(na)) return true;
+  return false;
+}
+
+type ExistingElection = {
+  id: string;
+  office: string;
+  description: string | null;
+  why_it_matters: string | null;
+  why_it_matters_source: string | null;
+};
 
 async function findExistingElection(
   supabase: SupabaseClient,
   election: NormalizedElection
-): Promise<{ id: string; description: string | null; why_it_matters: string | null; why_it_matters_source: string | null } | null> {
-  const { data } = await supabase
+): Promise<ExistingElection | null> {
+  // First: exact match on all fields including office
+  const { data: exact } = await supabase
     .from("elections")
-    .select("id, description, why_it_matters, why_it_matters_source")
-    .eq("level", election.level)
+    .select("id, office, description, why_it_matters, why_it_matters_source")
+    .eq("office", election.office)
     .eq("region_type", election.regionType)
     .eq("region_id", election.regionId)
     .eq("date", election.date)
     .limit(1)
     .maybeSingle();
 
-  return data;
+  if (exact) return exact;
+
+  // Second: fuzzy match — same region/date/level, compare office names
+  const { data: candidates } = await supabase
+    .from("elections")
+    .select("id, office, description, why_it_matters, why_it_matters_source")
+    .eq("level", election.level)
+    .eq("region_type", election.regionType)
+    .eq("region_id", election.regionId)
+    .eq("date", election.date);
+
+  if (!candidates || candidates.length === 0) return null;
+
+  // Find the best fuzzy match
+  for (const candidate of candidates) {
+    if (officeNamesMatch(election.office, candidate.office)) {
+      return candidate;
+    }
+  }
+
+  return null;
 }
 
 async function upsertElections(
