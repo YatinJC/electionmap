@@ -115,12 +115,16 @@ export interface NormalizedElection {
   }[];
 }
 
-function mapLevel(levels: string[] | undefined, roles: string[] | undefined): NormalizedElection["level"] {
+function mapLevel(levels: string[] | undefined, roles: string[] | undefined, officeName?: string): NormalizedElection["level"] {
+  if (roles?.includes("schoolBoard")) return "special_district";
+  // Detect school districts and special districts by name
+  if (officeName && /\b(ISD|school|board of education|water|utility|transit|fire|library)\b/i.test(officeName)) {
+    return "special_district";
+  }
   if (levels?.includes("country")) return "federal";
   if (levels?.includes("administrativeArea1")) return "state";
   if (levels?.includes("administrativeArea2")) return "county";
   if (levels?.includes("locality")) return "municipal";
-  if (roles?.includes("schoolBoard")) return "special_district";
   return "state";
 }
 
@@ -212,7 +216,7 @@ export async function fetchGoogleCivicElections(): Promise<NormalizedElection[]>
         const officeName = contest.office || contest.district?.name;
         if (!officeName) continue;
 
-        const level = mapLevel(contest.level, contest.roles);
+        const level = mapLevel(contest.level, contest.roles, officeName);
 
         elections.push({
           office: officeName,
