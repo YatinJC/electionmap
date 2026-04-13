@@ -4,6 +4,8 @@ import dynamic from "next/dynamic";
 import { useState, useCallback, useEffect } from "react";
 import ElectionPanel from "@/components/ElectionPanel";
 import { Election } from "@/types/elections";
+import MapLegend from "@/components/MapLegend";
+import type { HoverInfo } from "@/components/ElectionMap";
 
 const ElectionMap = dynamic(() => import("@/components/ElectionMap"), {
   ssr: false,
@@ -17,28 +19,60 @@ const ElectionMap = dynamic(() => import("@/components/ElectionMap"), {
   ),
 });
 
+const electionCache = new Map<string, Election[]>();
+
+async function fetchElections(info: HoverInfo): Promise<Election[]> {
+  const cacheKey = `${info.stateId}:${info.countyId ?? ""}:${info.districtId ?? ""}`;
+  const cached = electionCache.get(cacheKey);
+  if (cached) return cached;
+
+  const params = new URLSearchParams({ stateId: info.stateId });
+  if (info.countyId) params.set("countyId", info.countyId);
+  if (info.districtId) params.set("districtId", info.districtId);
+
+  const res = await fetch(`/api/elections?${params}`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  const elections = data.elections as Election[];
+  electionCache.set(cacheKey, elections);
+  return elections;
+}
+
 export default function Home() {
+  const [statesWithElections, setStatesWithElections] = useState<Set<string>>(new Set());
+  const [countiesWithElections, setCountiesWithElections] = useState<Set<string>>(new Set());
+  const [districtsWithElections, setDistrictsWithElections] = useState<Set<string>>(new Set());
+  const [summaryLoaded, setSummaryLoaded] = useState(false);
+  const [mapZoom, setMapZoom] = useState(5);
+
   const [hoveredElections, setHoveredElections] = useState<Election[]>([]);
   const [hoveredRegionName, setHoveredRegionName] = useState("");
 
-  // Locked (clicked) state
   const [lockedElections, setLockedElections] = useState<Election[]>([]);
   const [lockedRegionName, setLockedRegionName] = useState("");
   const [lockedRegionKey, setLockedRegionKey] = useState<string | null>(null);
 
   const isLocked = lockedRegionKey !== null;
-
-  // What the panel shows: locked state takes priority
   const displayElections = isLocked ? lockedElections : hoveredElections;
   const displayRegionName = isLocked ? lockedRegionName : hoveredRegionName;
 
-  const handleHoverElections = useCallback(
-    (elections: Election[], name: string) => {
-      setHoveredElections(elections);
-      setHoveredRegionName(name);
-    },
-    []
-  );
+  useEffect(() => {
+    fetch("/api/regions/summary")
+      .then((r) => r.json())
+      .then((data) => {
+        setStatesWithElections(new Set(data.statesWithElections));
+        setCountiesWithElections(new Set(data.countiesWithElections));
+        setDistrictsWithElections(new Set(data.districtsWithElections ?? []));
+        setSummaryLoaded(true);
+      })
+      .catch(() => setSummaryLoaded(true));
+  }, []);
+
+  const handleHoverRegion = useCallback(async (info: HoverInfo) => {
+    const elections = await fetchElections(info);
+    setHoveredElections(elections);
+    setHoveredRegionName(info.regionName);
+  }, []);
 
   const handleClearHover = useCallback(() => {
     setHoveredElections([]);
@@ -46,15 +80,15 @@ export default function Home() {
   }, []);
 
   const handleClickRegion = useCallback(
-    (elections: Election[], name: string, regionKey: string) => {
+    async (info: HoverInfo, regionKey: string) => {
       if (lockedRegionKey === regionKey) {
-        // Clicking the same region unlocks
         setLockedElections([]);
         setLockedRegionName("");
         setLockedRegionKey(null);
       } else {
+        const elections = await fetchElections(info);
         setLockedElections(elections);
-        setLockedRegionName(name);
+        setLockedRegionName(info.regionName);
         setLockedRegionKey(regionKey);
       }
     },
@@ -67,7 +101,6 @@ export default function Home() {
     setLockedRegionKey(null);
   }, []);
 
-  // Escape key unlocks
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") handleUnlock();
@@ -78,7 +111,6 @@ export default function Home() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* Header — game-style HUD bar */}
       <header className="bg-slate-900/80 backdrop-blur-md border-b border-slate-700/50 px-5 py-2.5 flex items-center justify-between z-20 relative">
         <div className="flex items-center gap-3">
           <h1 className="text-base font-bold text-white tracking-tight">
@@ -98,26 +130,24 @@ export default function Home() {
         </p>
       </header>
 
-      {/* Main content */}
       <div className="flex-1 flex relative overflow-hidden min-h-0">
-        {/* Map */}
         <div className="flex-1 relative h-full">
-          <ElectionMap
-            onHoverElections={handleHoverElections}
-            onClearHover={handleClearHover}
-            onClickRegion={handleClickRegion}
-            lockedRegionKey={lockedRegionKey}
-          />
+          {summaryLoaded && (
+            <ElectionMap
+              statesWithElections={statesWithElections}
+              countiesWithElections={countiesWithElections}
+              districtsWithElections={districtsWithElections}
+              onHoverRegion={handleHoverRegion}
+              onClearHover={handleClearHover}
+              onClickRegion={handleClickRegion}
+              lockedRegionKey={lockedRegionKey}
+              onZoomChange={setMapZoom}
+            />
+          )}
 
-          {/* Zoom hint overlay */}
-          <div className="absolute bottom-4 left-4 z-10 pointer-events-none">
-            <div className="bg-slate-900/70 backdrop-blur-sm border border-slate-700/50 rounded-lg px-3 py-2 text-xs text-slate-500 font-mono">
-              Zoom in to reveal county elections
-            </div>
-          </div>
+          <MapLegend showDetailLayers={mapZoom >= 7} />
         </div>
 
-        {/* Side panel — HUD style */}
         <div className="hidden sm:flex sm:flex-col w-96 h-full bg-slate-900/90 backdrop-blur-md border-l border-slate-700/50 z-10">
           <ElectionPanel
             elections={displayElections}
@@ -127,7 +157,6 @@ export default function Home() {
           />
         </div>
 
-        {/* Mobile: bottom panel */}
         {displayElections.length > 0 && (
           <div className="sm:hidden absolute bottom-0 left-0 right-0 z-10 max-h-[60vh] overflow-y-auto bg-slate-900/95 backdrop-blur-md border-t border-slate-700/50 rounded-t-xl">
             <ElectionPanel

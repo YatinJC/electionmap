@@ -365,6 +365,112 @@ export const elections: Election[] = [
     regionType: "county",
     regionId: "12086",
   },
+  // ── Congressional Districts ──────────────────────────────────────
+
+  // Georgia's 5th (Atlanta) — GEOID "1305"
+  {
+    id: "ga-cd5",
+    office: "U.S. Representative, Georgia 5th District",
+    level: "federal",
+    district: "Georgia's 5th Congressional District",
+    date: "2026-11-03",
+    description:
+      "The U.S. Representative for GA-5 serves in the House for a 2-year term. This district covers most of Atlanta and parts of Fulton, DeKalb, and Clayton counties. House members vote on all federal legislation and control the federal budget.",
+    whyItMatters:
+      "GA-5 was represented by John Lewis for 33 years. The district's shape — stretching across three counties — determines which Atlanta neighborhoods get grouped together for federal representation. This is where redistricting decisions become visible.",
+    candidates: [
+      { name: "Nikema Williams", party: "Democratic", incumbent: true },
+      { name: "TBD", party: "Republican", incumbent: false },
+    ],
+    regionType: "congressional_district",
+    regionId: "1305",
+  },
+  // Texas 7th (Houston suburbs) — GEOID "4807"
+  {
+    id: "tx-cd7",
+    office: "U.S. Representative, Texas 7th District",
+    level: "federal",
+    district: "Texas's 7th Congressional District",
+    date: "2026-11-03",
+    description:
+      "TX-7 covers western Houston and its suburbs. The representative serves a 2-year term in the U.S. House, voting on federal legislation including energy policy, immigration, and the federal budget.",
+    whyItMatters:
+      "TX-7 flipped from Republican to Democrat in 2018 after decades, then was redrawn in 2021 redistricting to be more competitive. The district's new boundaries split communities that were previously in the same district — a textbook example of how redistricting reshapes representation.",
+    candidates: [
+      { name: "TBD", party: "Multiple", incumbent: false },
+    ],
+    regionType: "congressional_district",
+    regionId: "4807",
+  },
+  // Illinois 4th (Chicago — the "earmuff" district) — GEOID "1704"
+  {
+    id: "il-cd4",
+    office: "U.S. Representative, Illinois 4th District",
+    level: "federal",
+    district: "Illinois's 4th Congressional District",
+    date: "2026-11-03",
+    description:
+      "IL-4 was designed to connect two Hispanic neighborhoods on Chicago's north and south sides. The representative serves a 2-year term in the U.S. House.",
+    whyItMatters:
+      "IL-4 is one of the most famous gerrymandered districts in America — nicknamed the 'earmuff district' because of its bizarre shape connecting two Latino communities via a thin strip along I-294. It was drawn to create a majority-Hispanic district under the Voting Rights Act, making it an example of gerrymandering for representation rather than partisan advantage.",
+    candidates: [
+      { name: "Chuy Garcia", party: "Democratic", incumbent: true },
+      { name: "TBD", party: "Republican", incumbent: false },
+    ],
+    regionType: "congressional_district",
+    regionId: "1704",
+  },
+  // North Carolina 12th (redrawn) — GEOID "3712"
+  {
+    id: "nc-cd12",
+    office: "U.S. Representative, North Carolina 12th District",
+    level: "federal",
+    district: "North Carolina's 12th Congressional District",
+    date: "2026-11-03",
+    description:
+      "NC-12 was historically one of the most gerrymandered districts in the country, stretching 120 miles along I-85 to connect Black communities in Charlotte and Greensboro. It has been redrawn multiple times after court challenges.",
+    whyItMatters:
+      "NC-12 has been at the center of two Supreme Court cases on racial gerrymandering (Shaw v. Reno, 1993 and Cooper v. Harris, 2017). Its history shows how district boundaries can be weaponized — and how courts can push back. The current boundaries reflect the latest round of redistricting after the 2020 Census.",
+    candidates: [
+      { name: "TBD", party: "Multiple", incumbent: false },
+    ],
+    regionType: "congressional_district",
+    regionId: "3712",
+  },
+  // Arizona 6th (Scottsdale/Tempe) — GEOID "0406"
+  {
+    id: "az-cd6",
+    office: "U.S. Representative, Arizona 6th District",
+    level: "federal",
+    district: "Arizona's 6th Congressional District",
+    date: "2026-11-03",
+    description:
+      "AZ-6 covers parts of Maricopa County including Scottsdale, Tempe, and Mesa. The representative votes on federal legislation for a 2-year term.",
+    whyItMatters:
+      "Arizona uses an independent redistricting commission — one of the few states where politicians don't draw their own district lines. AZ-6 is the result of that process, making it worth comparing to districts in states where legislators control redistricting.",
+    candidates: [
+      { name: "TBD", party: "Multiple", incumbent: false },
+    ],
+    regionType: "congressional_district",
+    regionId: "0406",
+  },
+  // Maryland 3rd — GEOID "2403"
+  {
+    id: "md-cd3",
+    office: "U.S. Representative, Maryland 3rd District",
+    level: "federal",
+    district: "Maryland's 3rd Congressional District",
+    date: "2026-11-03",
+    description:
+      "MD-3 covers parts of Baltimore and Anne Arundel County. The representative serves a 2-year term in the U.S. House.",
+    whyItMatters:
+      "MD-3 was previously considered one of the most gerrymandered districts in the country, with a shape so convoluted a federal judge called it 'reminiscent of a broken-winged pterodactyl.' Maryland's 2022 redistricting redrew the lines, but the district's history is a case study in how partisan gerrymandering works in practice.",
+    candidates: [
+      { name: "TBD", party: "Democratic", incumbent: true },
+    ],
+    regionType: "congressional_district",
+    regionId: "2403",
+  },
 ];
 
 // Build lookup indexes for fast access

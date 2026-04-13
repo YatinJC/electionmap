@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -8,56 +8,45 @@ import {
   useMapEvents,
 } from "react-leaflet";
 import type { Layer, LeafletMouseEvent, PathOptions } from "leaflet";
-import type { Feature, FeatureCollection, Geometry } from "geojson";
+import type { Feature, FeatureCollection, Geometry, Polygon, MultiPolygon } from "geojson";
 import * as topojson from "topojson-client";
 import type { Topology } from "topojson-specification";
-import { Election } from "@/types/elections";
-import {
-  statesWithElections,
-  countiesWithElections,
-  getElectionsForState,
-  getElectionsForCounty,
-} from "@/data/mock-elections";
-import { LEVEL_COLORS } from "@/lib/constants";
+import booleanPointInPolygon from "@turf/boolean-point-in-polygon";
+import { point as turfPoint } from "@turf/helpers";
+import { MAP_COLORS } from "@/lib/constants";
 
 // ── Types ─────────────────────────────────────────────────────────
 
 interface GeoFeature extends Feature<Geometry> {
   id?: string | number;
-  properties: { name: string };
+  properties: Record<string, string>;
 }
 
 interface MapData {
   states: GeoFeature[];
   counties: GeoFeature[];
+  districts: GeoFeature[];
+}
+
+export interface HoverInfo {
+  stateId: string;
+  countyId: string | null;
+  districtId: string | null;
+  regionName: string;
 }
 
 interface ElectionMapProps {
-  onHoverElections: (elections: Election[], regionName: string) => void;
+  statesWithElections: Set<string>;
+  countiesWithElections: Set<string>;
+  districtsWithElections: Set<string>;
+  onHoverRegion: (info: HoverInfo) => void;
   onClearHover: () => void;
-  onClickRegion: (elections: Election[], regionName: string, regionKey: string) => void;
+  onClickRegion: (info: HoverInfo, regionKey: string) => void;
   lockedRegionKey: string | null;
+  onZoomChange?: (zoom: number) => void;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
-
-function getHighestLevelColor(elections: Election[]): string {
-  const priority: Election["level"][] = [
-    "federal",
-    "state",
-    "county",
-    "municipal",
-    "special_district",
-  ];
-  for (const level of priority) {
-    if (elections.some((e) => e.level === level)) {
-      return LEVEL_COLORS[level];
-    }
-  }
-  return LEVEL_COLORS.county;
-}
-
-// ── Zoom tracker ──────────────────────────────────────────────────
 
 function ZoomTracker({ onZoomChange }: { onZoomChange: (z: number) => void }) {
   useMapEvents({
@@ -66,23 +55,11 @@ function ZoomTracker({ onZoomChange }: { onZoomChange: (z: number) => void }) {
   return null;
 }
 
-// ── Highlight style helper ────────────────────────────────────────
-
-function activeStyle(elections: Election[], isLocked: boolean): PathOptions {
-  const color = getHighestLevelColor(elections);
-  return {
-    fillColor: color,
-    fillOpacity: isLocked ? 0.35 : 0.25,
-    color: isLocked ? "#ffffff" : color,
-    weight: isLocked ? 3 : 2.5,
-    opacity: isLocked ? 1 : 0.9,
-  };
-}
-
 // ── State layer ───────────────────────────────────────────────────
 
 function StateLayer({
   features,
+  statesWithElections,
   hoveredStateId,
   lockedStateId,
   onHover,
@@ -90,44 +67,56 @@ function StateLayer({
   onClick,
 }: {
   features: GeoFeature[];
+  statesWithElections: Set<string>;
   hoveredStateId: string | null;
   lockedStateId: string | null;
   onHover: (id: string, name: string, e: LeafletMouseEvent) => void;
   onLeave: () => void;
-  onClick: (id: string, name: string) => void;
+  onClick: (id: string, name: string, e: LeafletMouseEvent) => void;
 }) {
-  const stateStyle = useCallback(
+  const style = useCallback(
     (feature?: GeoFeature): PathOptions => {
       if (!feature) return {};
       const id = String(feature.id);
-      const hasElections = statesWithElections.has(id);
+      const has = statesWithElections.has(id);
       const isLocked = lockedStateId === id;
       const isHovered = hoveredStateId === id;
 
-      if ((isLocked || isHovered) && hasElections) {
-        const elections = getElectionsForState(id);
-        return activeStyle(elections, isLocked);
+      if (isLocked) {
+        return {
+          fillColor: MAP_COLORS.lockedFill,
+          fillOpacity: 0.4,
+          color: MAP_COLORS.locked,
+          weight: 2.5,
+          opacity: 0.9,
+        };
       }
-
+      if (isHovered && has) {
+        return {
+          fillColor: MAP_COLORS.hoverFill,
+          fillOpacity: 0.25,
+          color: MAP_COLORS.hover,
+          weight: 2,
+          opacity: 0.8,
+        };
+      }
       return {
-        fillColor: hasElections ? "#1e40af" : "transparent",
-        fillOpacity: hasElections ? 0.08 : 0,
-        color: hasElections ? "#3b82f6" : "#334155",
-        weight: hasElections ? 1.2 : 0.5,
-        opacity: hasElections ? 0.5 : 0.2,
+        fillColor: has ? MAP_COLORS.activeFill : "transparent",
+        fillOpacity: has ? 0.06 : 0,
+        color: has ? MAP_COLORS.active : MAP_COLORS.inactive,
+        weight: has ? 1 : 0.5,
+        opacity: has ? 0.4 : 0.15,
       };
     },
-    [hoveredStateId, lockedStateId]
+    [hoveredStateId, lockedStateId, statesWithElections]
   );
 
-  const onEachState = useCallback(
+  const onEach = useCallback(
     (feature: GeoFeature, layer: Layer) => {
       layer.on({
-        mouseover: (e: LeafletMouseEvent) => {
-          onHover(String(feature.id), feature.properties.name, e);
-        },
+        mouseover: (e: LeafletMouseEvent) => onHover(String(feature.id), feature.properties.name, e),
         mouseout: () => onLeave(),
-        click: () => onClick(String(feature.id), feature.properties.name),
+        click: (e: LeafletMouseEvent) => onClick(String(feature.id), feature.properties.name, e),
       });
     },
     [onHover, onLeave, onClick]
@@ -135,20 +124,19 @@ function StateLayer({
 
   return (
     <GeoJSON
-      key={`states-${hoveredStateId}-${lockedStateId}`}
+      key={`s-${hoveredStateId}-${lockedStateId}`}
       data={{ type: "FeatureCollection", features } as FeatureCollection}
-      style={(feature) => stateStyle(feature as GeoFeature)}
-      onEachFeature={(feature, layer) =>
-        onEachState(feature as GeoFeature, layer)
-      }
+      style={(f) => style(f as GeoFeature)}
+      onEachFeature={(f, l) => onEach(f as GeoFeature, l)}
     />
   );
 }
 
-// ── County layer ──────────────────────────────────────────────────
+// ── County layer (owns all zoomed-in interaction) ─────────────────
 
 function CountyLayer({
   features,
+  countiesWithElections,
   hoveredCountyId,
   lockedCountyId,
   onHover,
@@ -156,54 +144,65 @@ function CountyLayer({
   onClick,
 }: {
   features: GeoFeature[];
+  countiesWithElections: Set<string>;
   hoveredCountyId: string | null;
   lockedCountyId: string | null;
   onHover: (id: string, name: string, e: LeafletMouseEvent) => void;
   onLeave: () => void;
-  onClick: (id: string, name: string) => void;
+  onClick: (id: string, name: string, e: LeafletMouseEvent) => void;
 }) {
-  const countyStyle = useCallback(
+  const style = useCallback(
     (feature?: GeoFeature): PathOptions => {
       if (!feature) return {};
       const id = String(feature.id);
-      const hasElections = countiesWithElections.has(id);
+      const has = countiesWithElections.has(id);
       const isLocked = lockedCountyId === id;
       const isHovered = hoveredCountyId === id;
 
-      if ((isLocked || isHovered) && hasElections) {
-        const elections = getElectionsForCounty(id);
-        return activeStyle(elections, isLocked);
-      }
-
-      if (isLocked || isHovered) {
+      if (isLocked) {
         return {
-          fillColor: "#475569",
-          fillOpacity: 0.15,
-          color: "#64748b",
-          weight: 1.5,
-          opacity: 0.6,
+          fillColor: MAP_COLORS.lockedFill,
+          fillOpacity: 0.45,
+          color: MAP_COLORS.locked,
+          weight: 2.5,
+          opacity: 1,
         };
       }
-
+      if (isHovered && has) {
+        return {
+          fillColor: MAP_COLORS.hoverFill,
+          fillOpacity: 0.3,
+          color: MAP_COLORS.hover,
+          weight: 2,
+          opacity: 0.9,
+        };
+      }
+      if (isHovered) {
+        return {
+          fillColor: "#1e293b",
+          fillOpacity: 0.15,
+          color: "#475569",
+          weight: 1.5,
+          opacity: 0.5,
+        };
+      }
       return {
-        fillColor: hasElections ? "#1e40af" : "transparent",
-        fillOpacity: hasElections ? 0.12 : 0,
-        color: hasElections ? "#60a5fa" : "#1e293b",
-        weight: hasElections ? 1 : 0.3,
-        opacity: hasElections ? 0.4 : 0.15,
+        fillColor: has ? MAP_COLORS.activeFill : "transparent",
+        fillOpacity: has ? 0.08 : 0,
+        color: has ? MAP_COLORS.active : MAP_COLORS.inactive,
+        weight: has ? 0.8 : 0.3,
+        opacity: has ? 0.35 : 0.1,
       };
     },
-    [hoveredCountyId, lockedCountyId]
+    [hoveredCountyId, lockedCountyId, countiesWithElections]
   );
 
-  const onEachCounty = useCallback(
+  const onEach = useCallback(
     (feature: GeoFeature, layer: Layer) => {
       layer.on({
-        mouseover: (e: LeafletMouseEvent) => {
-          onHover(String(feature.id), feature.properties.name, e);
-        },
+        mouseover: (e: LeafletMouseEvent) => onHover(String(feature.id), feature.properties.name, e),
         mouseout: () => onLeave(),
-        click: () => onClick(String(feature.id), feature.properties.name),
+        click: (e: LeafletMouseEvent) => onClick(String(feature.id), feature.properties.name, e),
       });
     },
     [onHover, onLeave, onClick]
@@ -211,12 +210,60 @@ function CountyLayer({
 
   return (
     <GeoJSON
-      key={`counties-${hoveredCountyId}-${lockedCountyId}`}
+      key={`c-${hoveredCountyId}-${lockedCountyId}`}
       data={{ type: "FeatureCollection", features } as FeatureCollection}
-      style={(feature) => countyStyle(feature as GeoFeature)}
-      onEachFeature={(feature, layer) =>
-        onEachCounty(feature as GeoFeature, layer)
+      style={(f) => style(f as GeoFeature)}
+      onEachFeature={(f, l) => onEach(f as GeoFeature, l)}
+    />
+  );
+}
+
+// ── District layer (visual only — dashed outlines, no interaction) ─
+
+function DistrictLayer({
+  features,
+  districtsWithElections,
+  activeDistrictId,
+}: {
+  features: GeoFeature[];
+  districtsWithElections: Set<string>;
+  activeDistrictId: string | null;
+}) {
+  const style = useCallback(
+    (feature?: GeoFeature): PathOptions => {
+      if (!feature) return {};
+      const id = feature.properties.GEOID;
+      const has = districtsWithElections.has(id);
+      const isActive = activeDistrictId === id;
+
+      if (isActive) {
+        return {
+          fillColor: MAP_COLORS.hoverFill,
+          fillOpacity: 0.15,
+          color: MAP_COLORS.hover,
+          weight: 2,
+          opacity: 0.7,
+          dashArray: "8 4",
+        };
       }
+      return {
+        fillColor: "transparent",
+        fillOpacity: 0,
+        color: has ? MAP_COLORS.active : "#1e293b",
+        weight: has ? 0.7 : 0.3,
+        opacity: has ? 0.25 : 0.08,
+        dashArray: "6 4",
+      };
+    },
+    [activeDistrictId, districtsWithElections]
+  );
+
+  return (
+    <GeoJSON
+      key={`d-${activeDistrictId}`}
+      data={{ type: "FeatureCollection", features } as FeatureCollection}
+      style={(f) => style(f as GeoFeature)}
+      interactive={false}
     />
   );
 }
@@ -224,22 +271,29 @@ function CountyLayer({
 // ── Main component ────────────────────────────────────────────────
 
 export default function ElectionMap({
-  onHoverElections,
+  statesWithElections,
+  countiesWithElections,
+  districtsWithElections,
+  onHoverRegion,
   onClearHover,
   onClickRegion,
   lockedRegionKey,
+  onZoomChange: onZoomChangeExternal,
 }: ElectionMapProps) {
   const [mounted, setMounted] = useState(false);
   const [mapData, setMapData] = useState<MapData | null>(null);
-  const [zoom, setZoom] = useState(5);
+  const [zoom, setZoomInternal] = useState(5);
+  const setZoom = useCallback((z: number) => {
+    setZoomInternal(z);
+    onZoomChangeExternal?.(z);
+  }, [onZoomChangeExternal]);
   const [hoveredStateId, setHoveredStateId] = useState<string | null>(null);
   const [hoveredCountyId, setHoveredCountyId] = useState<string | null>(null);
+  const [activeDistrictId, setActiveDistrictId] = useState<string | null>(null);
 
-  // Show counties at zoom >= 7
   const showCounties = zoom >= 7;
+  const showDistricts = zoom >= 7;
 
-  // Derive locked IDs from the parent's lockedRegionKey
-  // Keys are "state:XX" or "county:XXXXX"
   const lockedStateId =
     lockedRegionKey?.startsWith("state:") ? lockedRegionKey.slice(6) :
     lockedRegionKey?.startsWith("county:") ? lockedRegionKey.slice(7, 9) :
@@ -252,85 +306,110 @@ export default function ElectionMap({
     Promise.all([
       fetch("/geo/states-10m.json").then((r) => r.json()),
       fetch("/geo/counties-10m.json").then((r) => r.json()),
-    ]).then(([statesTopo, countiesTopo]: [Topology, Topology]) => {
+      fetch("/geo/districts-10m.json").then((r) => r.json()),
+    ]).then(([statesTopo, countiesTopo, districtsTopo]: [Topology, Topology, Topology]) => {
       const statesGeo = topojson.feature(statesTopo, statesTopo.objects.states);
-      const countiesGeo = topojson.feature(
-        countiesTopo,
-        countiesTopo.objects.counties
-      );
+      const countiesGeo = topojson.feature(countiesTopo, countiesTopo.objects.counties);
+      const districtsObj = Object.values(districtsTopo.objects)[0];
+      const districtsGeo = topojson.feature(districtsTopo, districtsObj);
       setMapData({
         states: (statesGeo as unknown as { features: GeoFeature[] }).features,
-        counties: (countiesGeo as unknown as { features: GeoFeature[] })
-          .features,
+        counties: (countiesGeo as unknown as { features: GeoFeature[] }).features,
+        districts: (districtsGeo as unknown as { features: GeoFeature[] }).features,
       });
     });
   }, []);
 
-  // ── Hover handlers (skip if locked) ─────────────────────────────
+  // Group districts by state for faster point-in-polygon lookup
+  const districtsByState = useMemo(() => {
+    if (!mapData) return new Map<string, GeoFeature[]>();
+    const map = new Map<string, GeoFeature[]>();
+    for (const d of mapData.districts) {
+      const s = d.properties.STATEFP;
+      const list = map.get(s) ?? [];
+      list.push(d);
+      map.set(s, list);
+    }
+    return map;
+  }, [mapData]);
+
+  const findDistrict = useCallback(
+    (lat: number, lng: number, stateFips: string): string | null => {
+      const candidates = districtsByState.get(stateFips);
+      if (!candidates) return null;
+      const pt = turfPoint([lng, lat]);
+      for (const d of candidates) {
+        try {
+          if (booleanPointInPolygon(pt, d as Feature<Polygon | MultiPolygon>)) {
+            return d.properties.GEOID;
+          }
+        } catch {
+          // skip invalid geometries
+        }
+      }
+      return null;
+    },
+    [districtsByState]
+  );
+
+  // ── Hover ───────────────────────────────────────────────────────
 
   const handleStateHover = useCallback(
     (id: string, name: string, _e: LeafletMouseEvent) => {
       if (lockedRegionKey || showCounties) return;
       setHoveredStateId(id);
-      const elections = getElectionsForState(id);
-      if (elections.length > 0) {
-        onHoverElections(elections, name);
-      } else {
-        onClearHover();
-      }
+      setActiveDistrictId(null);
+      onHoverRegion({ stateId: id, countyId: null, districtId: null, regionName: name });
     },
-    [showCounties, lockedRegionKey, onHoverElections, onClearHover]
+    [showCounties, lockedRegionKey, onHoverRegion]
   );
 
   const handleCountyHover = useCallback(
-    (id: string, name: string, _e: LeafletMouseEvent) => {
+    (id: string, name: string, e: LeafletMouseEvent) => {
       if (lockedRegionKey) return;
-      setHoveredCountyId(id);
       const stateId = id.substring(0, 2);
-      const stateElections = getElectionsForState(stateId);
-      const countyElections = getElectionsForCounty(id);
-      const allElections = [...countyElections, ...stateElections];
+      setHoveredCountyId(id);
       setHoveredStateId(stateId);
-      if (allElections.length > 0) {
-        onHoverElections(allElections, name);
-      } else {
-        onClearHover();
-      }
+      const { lat, lng } = e.latlng;
+      const districtId = findDistrict(lat, lng, stateId);
+      setActiveDistrictId(districtId);
+      onHoverRegion({ stateId, countyId: id, districtId, regionName: name });
     },
-    [lockedRegionKey, onHoverElections, onClearHover]
+    [lockedRegionKey, onHoverRegion, findDistrict]
   );
 
   const handleLeave = useCallback(() => {
     if (lockedRegionKey) return;
     setHoveredStateId(null);
     setHoveredCountyId(null);
+    setActiveDistrictId(null);
     onClearHover();
   }, [lockedRegionKey, onClearHover]);
 
-  // ── Click handlers ──────────────────────────────────────────────
+  // ── Click ───────────────────────────────────────────────────────
 
   const handleStateClick = useCallback(
-    (id: string, name: string) => {
+    (id: string, name: string, _e: LeafletMouseEvent) => {
       if (showCounties) return;
       setHoveredStateId(null);
       setHoveredCountyId(null);
-      const elections = getElectionsForState(id);
-      onClickRegion(elections, name, `state:${id}`);
+      setActiveDistrictId(null);
+      onClickRegion({ stateId: id, countyId: null, districtId: null, regionName: name }, `state:${id}`);
     },
     [showCounties, onClickRegion]
   );
 
   const handleCountyClick = useCallback(
-    (id: string, name: string) => {
+    (id: string, name: string, e: LeafletMouseEvent) => {
       setHoveredStateId(null);
       setHoveredCountyId(null);
       const stateId = id.substring(0, 2);
-      const stateElections = getElectionsForState(stateId);
-      const countyElections = getElectionsForCounty(id);
-      const allElections = [...countyElections, ...stateElections];
-      onClickRegion(allElections, name, `county:${id}`);
+      const { lat, lng } = e.latlng;
+      const districtId = findDistrict(lat, lng, stateId);
+      setActiveDistrictId(districtId);
+      onClickRegion({ stateId, countyId: id, districtId, regionName: name }, `county:${id}`);
     },
-    [onClickRegion]
+    [onClickRegion, findDistrict]
   );
 
   if (!mounted || !mapData) {
@@ -361,6 +440,7 @@ export default function ElectionMap({
 
       <StateLayer
         features={mapData.states}
+        statesWithElections={statesWithElections}
         hoveredStateId={hoveredStateId}
         lockedStateId={lockedStateId}
         onHover={handleStateHover}
@@ -368,9 +448,18 @@ export default function ElectionMap({
         onClick={handleStateClick}
       />
 
+      {showDistricts && (
+        <DistrictLayer
+          features={mapData.districts}
+          districtsWithElections={districtsWithElections}
+          activeDistrictId={activeDistrictId}
+        />
+      )}
+
       {showCounties && (
         <CountyLayer
           features={mapData.counties}
+          countiesWithElections={countiesWithElections}
           hoveredCountyId={hoveredCountyId}
           lockedCountyId={lockedCountyId}
           onHover={handleCountyHover}
