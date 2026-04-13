@@ -3,18 +3,51 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 
+// ── Input validation ──────────────────────────────────────────────
+
+function isValidFips(code: string | null): code is string {
+  // FIPS codes are 2-5 digit numeric strings
+  return code !== null && /^\d{2,5}$/.test(code);
+}
+
+const VALID_LEVELS = new Set([
+  "federal", "state", "county", "municipal", "special_district",
+]);
+
+function sanitizeLevels(raw: string | null): string[] | null {
+  if (!raw) return null;
+  const filtered = raw.split(",").filter((l) => VALID_LEVELS.has(l));
+  return filtered.length > 0 ? filtered : null;
+}
+
+// ── Route handler ─────────────────────────────────────────────────
+
 export async function GET(request: NextRequest) {
   const supabase = createClient();
   const params = request.nextUrl.searchParams;
   const stateId = params.get("stateId");
   const countyId = params.get("countyId");
   const districtId = params.get("districtId");
-  const months = parseInt(params.get("months") || "6", 10);
-  const levels = params.get("levels");
+  const months = Math.min(Math.max(parseInt(params.get("months") || "6", 10), 1), 48);
+  const levels = sanitizeLevels(params.get("levels"));
 
-  if (!stateId) {
+  if (!isValidFips(stateId)) {
     return NextResponse.json(
-      { error: "stateId is required" },
+      { error: "stateId must be a 2-5 digit FIPS code" },
+      { status: 400 }
+    );
+  }
+
+  if (countyId !== null && !isValidFips(countyId)) {
+    return NextResponse.json(
+      { error: "countyId must be a valid FIPS code" },
+      { status: 400 }
+    );
+  }
+
+  if (districtId !== null && !isValidFips(districtId)) {
+    return NextResponse.json(
+      { error: "districtId must be a valid FIPS code" },
       { status: 400 }
     );
   }
@@ -25,19 +58,14 @@ export async function GET(request: NextRequest) {
   const todayStr = now.toISOString().split("T")[0];
   const cutoffStr = cutoff.toISOString().split("T")[0];
 
-  // When a specific county or district is provided, fetch elections for
-  // that region plus the parent state (precise query for zoomed-in view).
-  //
-  // When ONLY stateId is provided (zoomed-out view), fetch ALL elections
-  // in the state — statewide, county, and district. This ensures states
-  // like Nevada (which only has House races, no statewide elections)
-  // still show data on hover.
+  // Build query using Supabase's parameterized methods where possible.
+  // The .or() filter still uses string syntax but inputs are now validated
+  // to be numeric-only FIPS codes, preventing injection.
   const conditions: string[] = [
     `and(region_type.eq.state,region_id.eq.${stateId})`,
   ];
 
   if (countyId || districtId) {
-    // Zoomed in — specific region
     if (countyId) {
       conditions.push(`and(region_type.eq.county,region_id.eq.${countyId})`);
     }
@@ -45,10 +73,7 @@ export async function GET(request: NextRequest) {
       conditions.push(`and(region_type.eq.congressional_district,region_id.eq.${districtId})`);
     }
   } else {
-    // Zoomed out — show everything in this state
-    // Congressional districts: region_id starts with state FIPS (e.g. "32" for NV)
     conditions.push(`and(region_type.eq.congressional_district,region_id.like.${stateId}*)`);
-    // Counties: region_id starts with state FIPS
     conditions.push(`and(region_type.eq.county,region_id.like.${stateId}*)`);
   }
 
@@ -65,7 +90,7 @@ export async function GET(request: NextRequest) {
     .or(conditions.join(","));
 
   if (levels) {
-    query = query.in("level", levels.split(","));
+    query = query.in("level", levels);
   }
 
   const { data, error } = await query.order("date").order("level");

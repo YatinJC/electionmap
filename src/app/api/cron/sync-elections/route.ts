@@ -12,16 +12,15 @@ export const maxDuration = 300;
  *   1. Ingest election data from all API sources
  *   2. Generate AI descriptions for any elections missing them
  *
- * Can also be triggered manually:
- *   curl http://localhost:3000/api/cron/sync-elections
+ * Trigger manually:
+ *   curl -H "Authorization: Bearer YOUR_CRON_SECRET" http://localhost:3000/api/cron/sync-elections
  */
 export async function GET(request: NextRequest) {
+  // Always require authentication — prevents abuse (expensive API calls + AI generation)
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = request.headers.get("authorization");
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+  const authHeader = request.headers.get("authorization");
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {

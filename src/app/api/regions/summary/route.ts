@@ -3,11 +3,18 @@ export const dynamic = "force-dynamic";
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 
+const VALID_LEVELS = new Set([
+  "federal", "state", "county", "municipal", "special_district",
+]);
+
 export async function GET(request: NextRequest) {
   const supabase = createClient();
   const params = request.nextUrl.searchParams;
-  const months = parseInt(params.get("months") || "6", 10);
-  const levels = params.get("levels");
+  const months = Math.min(Math.max(parseInt(params.get("months") || "6", 10), 1), 48);
+  const levelsRaw = params.get("levels");
+  const levels = levelsRaw
+    ? levelsRaw.split(",").filter((l) => VALID_LEVELS.has(l))
+    : null;
 
   const now = new Date();
   const cutoff = new Date(now);
@@ -22,8 +29,8 @@ export async function GET(request: NextRequest) {
     .gte("date", todayStr)
     .lte("date", cutoffStr);
 
-  if (levels) {
-    query = query.in("level", levels.split(","));
+  if (levels && levels.length > 0) {
+    query = query.in("level", levels);
   }
 
   const { data, error } = await query;
