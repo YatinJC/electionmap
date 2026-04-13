@@ -9,7 +9,8 @@ export async function GET(request: NextRequest) {
   const stateId = params.get("stateId");
   const countyId = params.get("countyId");
   const districtId = params.get("districtId");
-  const months = parseInt(params.get("months") || "6", 10); // time window in months
+  const months = parseInt(params.get("months") || "6", 10);
+  const levels = params.get("levels"); // comma-separated: "federal,state,county"
 
   if (!stateId) {
     return NextResponse.json(
@@ -36,7 +37,7 @@ export async function GET(request: NextRequest) {
     conditions.push(`and(region_type.eq.congressional_district,region_id.eq.${districtId})`);
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("elections")
     .select(`
       id, office, level, district, date, description,
@@ -46,9 +47,13 @@ export async function GET(request: NextRequest) {
     .eq("status", "active")
     .gte("date", todayStr)
     .lte("date", cutoffStr)
-    .or(conditions.join(","))
-    .order("date")
-    .order("level");
+    .or(conditions.join(","));
+
+  if (levels) {
+    query = query.in("level", levels.split(","));
+  }
+
+  const { data, error } = await query.order("date").order("level");
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });

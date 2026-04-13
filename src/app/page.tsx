@@ -5,6 +5,7 @@ import { useState, useCallback, useEffect } from "react";
 import ElectionPanel from "@/components/ElectionPanel";
 import { Election } from "@/types/elections";
 import MapLegend from "@/components/MapLegend";
+import { LEVEL_COLORS } from "@/lib/constants";
 import type { HoverInfo } from "@/components/ElectionMap";
 
 const ElectionMap = dynamic(() => import("@/components/ElectionMap"), {
@@ -19,17 +20,24 @@ const ElectionMap = dynamic(() => import("@/components/ElectionMap"), {
   ),
 });
 
-// Cache keyed by months + region so changing the time window invalidates
 const electionCache = new Map<string, Election[]>();
 
-async function fetchElections(info: HoverInfo, months: number): Promise<Election[]> {
-  const cacheKey = `${months}:${info.stateId}:${info.countyId ?? ""}:${info.districtId ?? ""}`;
+async function fetchElections(
+  info: HoverInfo,
+  months: number,
+  levels: string[]
+): Promise<Election[]> {
+  const levelsKey = levels.join(",");
+  const cacheKey = `${months}:${levelsKey}:${info.stateId}:${info.countyId ?? ""}:${info.districtId ?? ""}`;
   const cached = electionCache.get(cacheKey);
   if (cached) return cached;
 
   const params = new URLSearchParams({ stateId: info.stateId, months: String(months) });
   if (info.countyId) params.set("countyId", info.countyId);
   if (info.districtId) params.set("districtId", info.districtId);
+  if (levels.length > 0 && levels.length < ALL_LEVELS.length) {
+    params.set("levels", levelsKey);
+  }
 
   const res = await fetch(`/api/elections?${params}`);
   if (!res.ok) return [];
@@ -47,8 +55,19 @@ const TIME_WINDOW_OPTIONS = [
   { value: 24, label: "2 years" },
 ];
 
+const ALL_LEVELS = ["federal", "state", "county", "municipal", "special_district"];
+
+const LEVEL_LABELS: Record<string, string> = {
+  federal: "Federal",
+  state: "State",
+  county: "County",
+  municipal: "Municipal",
+  special_district: "Special",
+};
+
 export default function Home() {
   const [months, setMonths] = useState(12);
+  const [activeLevels, setActiveLevels] = useState<string[]>([...ALL_LEVELS]);
   const [statesWithElections, setStatesWithElections] = useState<Set<string>>(new Set());
   const [countiesWithElections, setCountiesWithElections] = useState<Set<string>>(new Set());
   const [districtsWithElections, setDistrictsWithElections] = useState<Set<string>>(new Set());
@@ -66,18 +85,33 @@ export default function Home() {
   const displayElections = isLocked ? lockedElections : hoveredElections;
   const displayRegionName = isLocked ? lockedRegionName : hoveredRegionName;
 
-  // Fetch region summary — re-fetch when time window changes
+  const toggleLevel = useCallback((level: string) => {
+    setActiveLevels((prev) => {
+      if (prev.includes(level)) {
+        // Don't allow deselecting all
+        if (prev.length === 1) return prev;
+        return prev.filter((l) => l !== level);
+      }
+      return [...prev, level];
+    });
+  }, []);
+
+  // Fetch region summary — re-fetch when filters change
+  const levelsParam = activeLevels.length < ALL_LEVELS.length ? activeLevels.join(",") : "";
+
   useEffect(() => {
     setSummaryLoaded(false);
     electionCache.clear();
-    // Clear any locked/hovered state since data is changing
     setLockedElections([]);
     setLockedRegionName("");
     setLockedRegionKey(null);
     setHoveredElections([]);
     setHoveredRegionName("");
 
-    fetch(`/api/regions/summary?months=${months}`)
+    const params = new URLSearchParams({ months: String(months) });
+    if (levelsParam) params.set("levels", levelsParam);
+
+    fetch(`/api/regions/summary?${params}`)
       .then((r) => r.json())
       .then((data) => {
         setStatesWithElections(new Set(data.statesWithElections));
@@ -86,13 +120,13 @@ export default function Home() {
         setSummaryLoaded(true);
       })
       .catch(() => setSummaryLoaded(true));
-  }, [months]);
+  }, [months, levelsParam]);
 
   const handleHoverRegion = useCallback(async (info: HoverInfo) => {
-    const elections = await fetchElections(info, months);
+    const elections = await fetchElections(info, months, activeLevels);
     setHoveredElections(elections);
     setHoveredRegionName(info.regionName);
-  }, [months]);
+  }, [months, activeLevels]);
 
   const handleClearHover = useCallback(() => {
     setHoveredElections([]);
@@ -106,13 +140,13 @@ export default function Home() {
         setLockedRegionName("");
         setLockedRegionKey(null);
       } else {
-        const elections = await fetchElections(info, months);
+        const elections = await fetchElections(info, months, activeLevels);
         setLockedElections(elections);
         setLockedRegionName(info.regionName);
         setLockedRegionKey(regionKey);
       }
     },
-    [lockedRegionKey, months]
+    [lockedRegionKey, months, activeLevels]
   );
 
   const handleUnlock = useCallback(() => {
@@ -140,15 +174,36 @@ export default function Home() {
             Beta
           </span>
         </div>
-        <p className="text-slate-400 text-sm hidden md:block">
+        <p className="text-slate-400 text-sm hidden lg:block">
           Every Election, Everywhere
         </p>
         <div className="flex items-center gap-3">
+          {/* Level filter toggles */}
+          <div className="flex items-center gap-1 hidden sm:flex">
+            {ALL_LEVELS.map((level) => {
+              const isActive = activeLevels.includes(level);
+              const color = LEVEL_COLORS[level];
+              return (
+                <button
+                  key={level}
+                  onClick={() => toggleLevel(level)}
+                  className="px-2 py-1 rounded text-[10px] font-semibold uppercase tracking-wide transition-all border"
+                  style={{
+                    backgroundColor: isActive ? color + "22" : "transparent",
+                    borderColor: isActive ? color + "44" : "#334155",
+                    color: isActive ? color : "#475569",
+                    opacity: isActive ? 1 : 0.5,
+                  }}
+                  title={`${isActive ? "Hide" : "Show"} ${LEVEL_LABELS[level]} elections`}
+                >
+                  {LEVEL_LABELS[level]}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Time window selector */}
           <div className="flex items-center gap-2">
-            <label htmlFor="time-window" className="text-slate-500 text-xs hidden sm:block">
-              Showing next
-            </label>
             <select
               id="time-window"
               value={months}
@@ -162,7 +217,7 @@ export default function Home() {
               ))}
             </select>
           </div>
-          <p className="text-slate-500 text-xs hidden sm:block font-mono">
+          <p className="text-slate-500 text-xs hidden md:block font-mono">
             {isLocked
               ? "Esc to unlock"
               : "Hover \u00b7 Click \u00b7 Scroll"}

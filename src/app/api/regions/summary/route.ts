@@ -5,7 +5,9 @@ import { createClient } from "@/utils/supabase/server";
 
 export async function GET(request: NextRequest) {
   const supabase = createClient();
-  const months = parseInt(request.nextUrl.searchParams.get("months") || "6", 10);
+  const params = request.nextUrl.searchParams;
+  const months = parseInt(params.get("months") || "6", 10);
+  const levels = params.get("levels");
 
   const now = new Date();
   const cutoff = new Date(now);
@@ -13,12 +15,18 @@ export async function GET(request: NextRequest) {
   const todayStr = now.toISOString().split("T")[0];
   const cutoffStr = cutoff.toISOString().split("T")[0];
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("elections")
     .select("region_type, region_id")
     .eq("status", "active")
     .gte("date", todayStr)
     .lte("date", cutoffStr);
+
+  if (levels) {
+    query = query.in("level", levels.split(","));
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
