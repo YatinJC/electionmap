@@ -27,12 +27,16 @@ interface MapData {
   states: GeoFeature[];
   counties: GeoFeature[];
   districts: GeoFeature[];
+  sldUpper: GeoFeature[];
+  sldLower: GeoFeature[];
 }
 
 export interface HoverInfo {
   stateId: string;
   countyId: string | null;
   districtId: string | null;
+  sldUpperId: string | null;
+  sldLowerId: string | null;
   regionName: string;
 }
 
@@ -157,15 +161,23 @@ export default function ElectionMap({
       fetch("/geo/states-10m.json").then((r) => r.json()),
       fetch("/geo/counties-10m.json").then((r) => r.json()),
       fetch("/geo/districts-10m.json").then((r) => r.json()),
-    ]).then(([statesTopo, countiesTopo, districtsTopo]: [Topology, Topology, Topology]) => {
+      fetch("/geo/sldu-10m.json").then((r) => r.json()),
+      fetch("/geo/sldl-10m.json").then((r) => r.json()),
+    ]).then(([statesTopo, countiesTopo, districtsTopo, slduTopo, sldlTopo]: Topology[]) => {
       const statesGeo = topojson.feature(statesTopo, statesTopo.objects.states);
       const countiesGeo = topojson.feature(countiesTopo, countiesTopo.objects.counties);
       const districtsObj = Object.values(districtsTopo.objects)[0];
       const districtsGeo = topojson.feature(districtsTopo, districtsObj);
+      const slduObj = Object.values(slduTopo.objects)[0];
+      const slduGeo = topojson.feature(slduTopo, slduObj);
+      const sldlObj = Object.values(sldlTopo.objects)[0];
+      const sldlGeo = topojson.feature(sldlTopo, sldlObj);
       setMapData({
         states: (statesGeo as unknown as { features: GeoFeature[] }).features,
         counties: (countiesGeo as unknown as { features: GeoFeature[] }).features,
         districts: (districtsGeo as unknown as { features: GeoFeature[] }).features,
+        sldUpper: (slduGeo as unknown as { features: GeoFeature[] }).features,
+        sldLower: (sldlGeo as unknown as { features: GeoFeature[] }).features,
       });
     });
   }, []);
@@ -184,63 +196,75 @@ export default function ElectionMap({
     return map;
   }, [mapData]);
 
-  // County spatial index — group by state FIPS
+  // Spatial indexes — group features by state FIPS for faster lookup
   const countiesByState = useMemo(() => {
     if (!mapData) return new Map<string, GeoFeature[]>();
     const map = new Map<string, GeoFeature[]>();
     for (const c of mapData.counties) {
-      const stateFips = String(c.id).substring(0, 2);
-      const list = map.get(stateFips) ?? [];
-      list.push(c);
-      map.set(stateFips, list);
+      const s = String(c.id).substring(0, 2);
+      (map.get(s) ?? (map.set(s, []), map.get(s)!)).push(c);
+    }
+    return map;
+  }, [mapData]);
+
+  const sldUpperByState = useMemo(() => {
+    if (!mapData) return new Map<string, GeoFeature[]>();
+    const map = new Map<string, GeoFeature[]>();
+    for (const f of mapData.sldUpper) {
+      const s = f.properties.STATEFP;
+      (map.get(s) ?? (map.set(s, []), map.get(s)!)).push(f);
+    }
+    return map;
+  }, [mapData]);
+
+  const sldLowerByState = useMemo(() => {
+    if (!mapData) return new Map<string, GeoFeature[]>();
+    const map = new Map<string, GeoFeature[]>();
+    for (const f of mapData.sldLower) {
+      const s = f.properties.STATEFP;
+      (map.get(s) ?? (map.set(s, []), map.get(s)!)).push(f);
     }
     return map;
   }, [mapData]);
 
   // Cache for point-in-polygon lookups
-  const lastLookup = useRef<{ lat: number; lng: number; countyId: string | null; districtId: string | null }>({ lat: 0, lng: 0, countyId: null, districtId: null });
+  type LocationResult = { countyId: string | null; districtId: string | null; sldUpperId: string | null; sldLowerId: string | null };
+  const lastLookup = useRef<{ lat: number; lng: number } & LocationResult>({ lat: 0, lng: 0, countyId: null, districtId: null, sldUpperId: null, sldLowerId: null });
 
   const findLocation = useCallback(
-    (lat: number, lng: number, stateFips: string): { countyId: string | null; districtId: string | null } => {
+    (lat: number, lng: number, stateFips: string): LocationResult => {
       const last = lastLookup.current;
       if (Math.abs(lat - last.lat) < 0.005 && Math.abs(lng - last.lng) < 0.005) {
-        return { countyId: last.countyId, districtId: last.districtId };
+        return { countyId: last.countyId, districtId: last.districtId, sldUpperId: last.sldUpperId, sldLowerId: last.sldLowerId };
       }
 
       const pt = turfPoint([lng, lat]);
       let countyId: string | null = null;
       let districtId: string | null = null;
+      let sldUpperId: string | null = null;
+      let sldLowerId: string | null = null;
 
-      // Find county
-      const stateCounties = countiesByState.get(stateFips);
-      if (stateCounties) {
-        for (const c of stateCounties) {
+      const pip = (features: GeoFeature[] | undefined): string | null => {
+        if (!features) return null;
+        for (const f of features) {
           try {
-            if (booleanPointInPolygon(pt, c as Feature<Polygon | MultiPolygon>)) {
-              countyId = String(c.id);
-              break;
+            if (booleanPointInPolygon(pt, f as Feature<Polygon | MultiPolygon>)) {
+              return f.properties.GEOID || String(f.id);
             }
           } catch { /* skip */ }
         }
-      }
+        return null;
+      };
 
-      // Find district
-      const stateDistricts = districtsByState.get(stateFips);
-      if (stateDistricts) {
-        for (const d of stateDistricts) {
-          try {
-            if (booleanPointInPolygon(pt, d as Feature<Polygon | MultiPolygon>)) {
-              districtId = d.properties.GEOID;
-              break;
-            }
-          } catch { /* skip */ }
-        }
-      }
+      countyId = pip(countiesByState.get(stateFips));
+      districtId = pip(districtsByState.get(stateFips));
+      sldUpperId = pip(sldUpperByState.get(stateFips));
+      sldLowerId = pip(sldLowerByState.get(stateFips));
 
-      lastLookup.current = { lat, lng, countyId, districtId };
-      return { countyId, districtId };
+      lastLookup.current = { lat, lng, countyId, districtId, sldUpperId, sldLowerId };
+      return { countyId, districtId, sldUpperId, sldLowerId };
     },
-    [countiesByState, districtsByState]
+    [countiesByState, districtsByState, sldUpperByState, sldLowerByState]
   );
 
   // ── Imperative style updates ────────────────────────────────────
@@ -331,16 +355,15 @@ export default function ElectionMap({
 
     layer.on({
       mouseover: (e: LeafletMouseEvent) => {
-        // At county zoom, the county layer handles hover instead
         if (lockedRegionKeyRef.current || showCountiesRef.current) return;
         if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
         hoverTimerRef.current = setTimeout(() => {
           const { lat, lng } = e.latlng;
-          const { countyId, districtId } = findLocationRef.current(lat, lng, id);
+          const loc = findLocationRef.current(lat, lng, id);
           setHoveredStateId(id);
           setHoveredCountyId(null);
-          setActiveDistrictId(districtId);
-          onHoverRegionRef.current({ stateId: id, countyId, districtId, regionName: name });
+          setActiveDistrictId(loc.districtId);
+          onHoverRegionRef.current({ stateId: id, ...loc, regionName: name });
         }, 16);
       },
       mouseout: () => {
@@ -354,11 +377,11 @@ export default function ElectionMap({
       click: (e: LeafletMouseEvent) => {
         if (showCountiesRef.current) return;
         const { lat, lng } = e.latlng;
-        const { countyId, districtId } = findLocationRef.current(lat, lng, id);
+        const loc = findLocationRef.current(lat, lng, id);
         setHoveredStateId(null);
         setHoveredCountyId(null);
         setActiveDistrictId(null);
-        onClickRegionRef.current({ stateId: id, countyId, districtId, regionName: name }, `state:${id}`);
+        onClickRegionRef.current({ stateId: id, ...loc, regionName: name }, `state:${id}`);
       },
     });
   }, []);
@@ -375,11 +398,11 @@ export default function ElectionMap({
         hoverTimerRef.current = setTimeout(() => {
           const stateId = id.substring(0, 2);
           const { lat, lng } = e.latlng;
-          const { districtId } = findLocationRef.current(lat, lng, stateId);
+          const loc = findLocationRef.current(lat, lng, stateId);
           setHoveredCountyId(id);
           setHoveredStateId(stateId);
-          setActiveDistrictId(districtId);
-          onHoverRegionRef.current({ stateId, countyId: id, districtId, regionName: name });
+          setActiveDistrictId(loc.districtId);
+          onHoverRegionRef.current({ stateId, countyId: id, districtId: loc.districtId, sldUpperId: loc.sldUpperId, sldLowerId: loc.sldLowerId, regionName: name });
         }, 16);
       },
       mouseout: () => {
@@ -395,9 +418,9 @@ export default function ElectionMap({
         setHoveredCountyId(null);
         const stateId = id.substring(0, 2);
         const { lat, lng } = e.latlng;
-        const { districtId } = findLocationRef.current(lat, lng, stateId);
-        setActiveDistrictId(districtId);
-        onClickRegionRef.current({ stateId, countyId: id, districtId, regionName: name }, `county:${id}`);
+        const loc = findLocationRef.current(lat, lng, stateId);
+        setActiveDistrictId(loc.districtId);
+        onClickRegionRef.current({ stateId, countyId: id, districtId: loc.districtId, sldUpperId: loc.sldUpperId, sldLowerId: loc.sldLowerId, regionName: name }, `county:${id}`);
       },
     });
   }, []);

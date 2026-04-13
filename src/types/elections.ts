@@ -18,8 +18,8 @@ export interface Election {
   candidates: Candidate[];
   // Geographic binding — which regions does this election apply to?
   // "state:13" = Georgia (FIPS 13), "county:13121" = Fulton County, etc.
-  regionType: "nation" | "state" | "county" | "congressional_district";
-  regionId: string; // FIPS code (for districts: SSDD e.g. "0804" = CO-4)
+  regionType: "nation" | "state" | "county" | "congressional_district" | "state_legislative_upper" | "state_legislative_lower";
+  regionId: string; // FIPS code
 }
 
 // Elections grouped by location for the hover panel

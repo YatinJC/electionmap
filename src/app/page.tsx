@@ -28,13 +28,15 @@ async function fetchElections(
   levels: string[]
 ): Promise<Election[]> {
   const levelsKey = levels.join(",");
-  const cacheKey = `${months}:${levelsKey}:${info.stateId}:${info.countyId ?? ""}:${info.districtId ?? ""}`;
+  const cacheKey = `${months}:${levelsKey}:${info.stateId}:${info.countyId ?? ""}:${info.districtId ?? ""}:${info.sldUpperId ?? ""}:${info.sldLowerId ?? ""}`;
   const cached = electionCache.get(cacheKey);
   if (cached) return cached;
 
   const params = new URLSearchParams({ stateId: info.stateId, months: String(months) });
   if (info.countyId) params.set("countyId", info.countyId);
   if (info.districtId) params.set("districtId", info.districtId);
+  if (info.sldUpperId) params.set("sldUpperId", info.sldUpperId);
+  if (info.sldLowerId) params.set("sldLowerId", info.sldLowerId);
   if (levels.length > 0 && levels.length < ALL_LEVELS.length) {
     params.set("levels", levelsKey);
   }

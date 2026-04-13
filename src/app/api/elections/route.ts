@@ -28,6 +28,8 @@ export async function GET(request: NextRequest) {
   const stateId = params.get("stateId");
   const countyId = params.get("countyId");
   const districtId = params.get("districtId");
+  const sldUpperId = params.get("sldUpperId"); // state legislative upper chamber GEOID
+  const sldLowerId = params.get("sldLowerId"); // state legislative lower chamber GEOID
   const months = Math.min(Math.max(parseInt(params.get("months") || "6", 10), 1), 48);
   const levels = sanitizeLevels(params.get("levels"));
 
@@ -38,18 +40,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  if (countyId !== null && !isValidFips(countyId)) {
-    return NextResponse.json(
-      { error: "countyId must be a valid FIPS code" },
-      { status: 400 }
-    );
-  }
-
-  if (districtId !== null && !isValidFips(districtId)) {
-    return NextResponse.json(
-      { error: "districtId must be a valid FIPS code" },
-      { status: 400 }
-    );
+  for (const [name, val] of [["countyId", countyId], ["districtId", districtId], ["sldUpperId", sldUpperId], ["sldLowerId", sldLowerId]] as const) {
+    if (val !== null && !isValidFips(val)) {
+      return NextResponse.json({ error: `${name} must be a valid FIPS code` }, { status: 400 });
+    }
   }
 
   const now = new Date();
@@ -72,6 +66,12 @@ export async function GET(request: NextRequest) {
   }
   if (districtId) {
     conditions.push(`and(region_type.eq.congressional_district,region_id.eq.${districtId})`);
+  }
+  if (sldUpperId) {
+    conditions.push(`and(region_type.eq.state_legislative_upper,region_id.eq.${sldUpperId})`);
+  }
+  if (sldLowerId) {
+    conditions.push(`and(region_type.eq.state_legislative_lower,region_id.eq.${sldLowerId})`);
   }
 
   let query = supabase

@@ -65,6 +65,9 @@ export async function GET(request: NextRequest) {
     } else if (r.region_type === "congressional_district") {
       districtSet.add(r.region_id);
       stateSet.add(r.region_id.substring(0, 2));
+    } else if (r.region_type === "state_legislative_upper" || r.region_type === "state_legislative_lower") {
+      // SLD elections contribute to state highlighting but don't have their own map layer
+      stateSet.add(r.region_id.substring(0, 2));
     }
   }
 

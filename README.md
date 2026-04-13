@@ -2,7 +2,7 @@
 
 **Every Election, Everywhere.**
 
-An interactive map of the United States that shows every upcoming election — from Senate races to school boards — with plain-language explanations of what each office does and why it matters.
+An interactive map of the United States that shows every upcoming election - from Senate races to school boards - with plain-language explanations of what each office does and why it matters.
 
 ## Why
 
@@ -120,6 +120,7 @@ This project is in active development. The biggest needs are:
 - **Data sources** — access to BallotReady or Democracy Works APIs for local election coverage
 - **"Why it matters" content** — improving AI-generated descriptions with human-written context
 - **Testing** — verifying election data accuracy across states
+-**Localization and Accessibility** - More languages, accommodations for vision impairments, other ideas idk
 
 ## License
 

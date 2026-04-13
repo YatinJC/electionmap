@@ -50,7 +50,7 @@ export interface NormalizedElection {
   level: "state";
   district: string;
   date: string;
-  regionType: "state";
+  regionType: "state" | "state_legislative_upper" | "state_legislative_lower";
   regionId: string;
   candidates: {
     name: string;
@@ -128,13 +128,14 @@ export async function fetchStateLegislatureElections(): Promise<NormalizedElecti
     for (const person of senators) {
       if (!person.current_role) continue;
       const dist = person.current_role.district;
+      const distPadded = dist.replace(/[^0-9A-Za-z]/g, "").padStart(3, "0");
       elections.push({
         office: `State Senator — ${stateUpper} District ${dist}`,
         level: "state",
         district: `${jurisdiction.name} Senate District ${dist}`,
         date: ELECTION_DATE,
-        regionType: "state",
-        regionId: stateFips,
+        regionType: "state_legislative_upper",
+        regionId: `${stateFips}${distPadded}`,
         candidates: [
           {
             name: person.name,
@@ -151,14 +152,15 @@ export async function fetchStateLegislatureElections(): Promise<NormalizedElecti
     for (const person of reps) {
       if (!person.current_role) continue;
       const dist = person.current_role.district;
+      const distPadded = dist.replace(/[^0-9A-Za-z]/g, "").padStart(3, "0");
       const chamberName = jurisdiction.name === "Nebraska" ? "Legislature" : "House";
       elections.push({
         office: `State ${chamberName === "House" ? "Representative" : "Senator"} — ${stateUpper} District ${dist}`,
         level: "state",
         district: `${jurisdiction.name} ${chamberName} District ${dist}`,
         date: ELECTION_DATE,
-        regionType: "state",
-        regionId: stateFips,
+        regionType: "state_legislative_lower",
+        regionId: `${stateFips}${distPadded}`,
         candidates: [
           {
             name: person.name,

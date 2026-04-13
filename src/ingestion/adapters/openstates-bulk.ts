@@ -46,7 +46,7 @@ export interface NormalizedElection {
   level: "state";
   district: string;
   date: string;
-  regionType: "state";
+  regionType: "state" | "state_legislative_upper" | "state_legislative_lower";
   regionId: string;
   candidates: {
     name: string;
@@ -115,14 +115,20 @@ export async function fetchStateLegislatureBulk(): Promise<NormalizedElection[]>
         const office = `State ${roleLabel} — ${stateUpper} District ${dist}`;
         const key = `${stateAbbr}:${chamber}:${dist}`;
 
+        // Build Census-compatible GEOID: state FIPS + district padded to 3 digits
+        // e.g. GA Senate District 12 → "13" + "012" → "13012"
+        const distPadded = dist.replace(/[^0-9A-Za-z]/g, "").padStart(3, "0");
+        const geoid = `${stateFips}${distPadded}`;
+        const regionType = chamber === "upper" ? "state_legislative_upper" : "state_legislative_lower";
+
         if (!elections.has(key)) {
           elections.set(key, {
             office,
             level: "state",
             district: `${stateName} ${chamberLabel} District ${dist}`,
             date: ELECTION_DATE,
-            regionType: "state",
-            regionId: stateFips,
+            regionType: regionType as "state_legislative_upper" | "state_legislative_lower",
+            regionId: geoid,
             candidates: [],
           });
         }
