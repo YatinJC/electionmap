@@ -128,12 +128,13 @@ function ElectionCard({ election }: { election: Election }) {
 interface ElectionPanelProps {
   elections: Election[];
   regionName: string;
-  isLocked: boolean;
-  onUnlock: () => void;
+  hasPin: boolean;
+  loading: boolean;
+  onClear: () => void;
 }
 
-export default function ElectionPanel({ elections, regionName, isLocked, onUnlock }: ElectionPanelProps) {
-  if (elections.length === 0) {
+export default function ElectionPanel({ elections, regionName, hasPin, loading, onClear }: ElectionPanelProps) {
+  if (!hasPin) {
     return (
       <div className="h-full flex flex-col overflow-y-auto">
         <div className="flex-1 flex flex-col items-center justify-center px-6 text-center">
@@ -148,9 +149,9 @@ export default function ElectionPanel({ elections, regionName, isLocked, onUnloc
 
             {/* Title */}
             <div>
-              <h2 className="text-lg font-bold text-white mb-1.5">Explore the map</h2>
+              <h2 className="text-lg font-bold text-white mb-1.5">Click anywhere on the map</h2>
               <p className="text-slate-400 text-sm leading-relaxed">
-                Hover over any area to see every election happening there. Click to pin the view while you read.
+                See every election a person at that exact location can vote in &mdash; federal, state, county, municipal, and special districts.
               </p>
             </div>
 
@@ -160,19 +161,15 @@ export default function ElectionPanel({ elections, regionName, isLocked, onUnloc
               <div className="space-y-1.5">
                 <div className="flex items-start gap-2 text-xs text-slate-400">
                   <span className="text-slate-500 mt-px">1.</span>
-                  <span><span className="text-slate-300">Hover</span> to preview elections in any area</span>
+                  <span><span className="text-slate-300">Click</span> any point on the map</span>
                 </div>
                 <div className="flex items-start gap-2 text-xs text-slate-400">
                   <span className="text-slate-500 mt-px">2.</span>
-                  <span><span className="text-slate-300">Click</span> to pin and scroll through details</span>
+                  <span><span className="text-slate-300">Search</span> an address or use your location</span>
                 </div>
                 <div className="flex items-start gap-2 text-xs text-slate-400">
                   <span className="text-slate-500 mt-px">3.</span>
-                  <span><span className="text-slate-300">Zoom in</span> to see county and district boundaries</span>
-                </div>
-                <div className="flex items-start gap-2 text-xs text-slate-400">
-                  <span className="text-slate-500 mt-px">4.</span>
-                  <span><span className="text-slate-300">Esc</span> or click again to unlock</span>
+                  <span><span className="text-slate-300">Esc</span> to clear the pin</span>
                 </div>
               </div>
             </div>
@@ -237,24 +234,31 @@ export default function ElectionPanel({ elections, regionName, isLocked, onUnloc
     <div className="h-full flex flex-col">
       {/* Header */}
       <div className="px-4 py-3 border-b border-slate-700/50">
-        <div className="flex items-center justify-between">
-          <h2 className="font-bold text-white text-lg">{regionName}</h2>
-          {isLocked && (
-            <button
-              onClick={onUnlock}
-              className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded transition-colors"
-              title="Unlock (Esc)"
-            >
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <rect x="2" y="5.5" width="8" height="5" rx="1" />
-                <path d="M4 5.5V4a2 2 0 014 0v1.5" />
-              </svg>
-              Pinned
-            </button>
-          )}
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="font-bold text-white text-lg truncate">
+            {regionName || "Selected location"}
+          </h2>
+          <button
+            onClick={onClear}
+            className="flex items-center gap-1.5 text-xs text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 border border-slate-700 px-2 py-1 rounded transition-colors flex-shrink-0"
+            title="Clear pin (Esc)"
+          >
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <path d="M2 2l6 6M8 2l-6 6" />
+            </svg>
+            Clear
+          </button>
         </div>
         <p className="text-slate-400 text-sm">
-          {elections.length} election{elections.length !== 1 ? "s" : ""} across {activeLevels.length} level{activeLevels.length !== 1 ? "s" : ""} of government
+          {loading ? (
+            "Loading…"
+          ) : elections.length === 0 ? (
+            "No upcoming elections in this window"
+          ) : (
+            <>
+              {elections.length} election{elections.length !== 1 ? "s" : ""} across {activeLevels.length} level{activeLevels.length !== 1 ? "s" : ""} of government
+            </>
+          )}
         </p>
       </div>
 

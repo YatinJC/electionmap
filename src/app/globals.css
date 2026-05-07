@@ -40,17 +40,6 @@ body {
   color: #64748b !important;
 }
 
-/* ── GeoJSON layer glow effects ────────────────────────────────── */
-
-.leaflet-interactive {
-  transition: fill-opacity 0.15s ease, stroke-opacity 0.15s ease, stroke-width 0.15s ease;
-}
-
-/* SVG filter for the glow — applied via Leaflet's SVG renderer */
-.leaflet-overlay-pane svg {
-  filter: url(#glow);
-}
-
 /* ── Scrollbar styling (game UI feel) ──────────────────────────── */
 
 ::-webkit-scrollbar {

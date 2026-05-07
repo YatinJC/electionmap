@@ -22,59 +22,21 @@ export async function GET(request: NextRequest) {
   const todayStr = now.toISOString().split("T")[0];
   const cutoffStr = cutoff.toISOString().split("T")[0];
 
-  // Paginate to get ALL elections — Supabase defaults to 1,000 rows max
-  const allRows: { region_type: string; region_id: string }[] = [];
-  let page = 0;
-  const PAGE_SIZE = 1000;
+  let query = supabase
+    .from("elections")
+    .select("*", { count: "exact", head: true })
+    .eq("status", "active")
+    .gte("date", todayStr)
+    .lte("date", cutoffStr);
 
-  while (true) {
-    let query = supabase
-      .from("elections")
-      .select("region_type, region_id")
-      .eq("status", "active")
-      .gte("date", todayStr)
-      .lte("date", cutoffStr)
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1);
-
-    if (levels && levels.length > 0) {
-      query = query.in("level", levels);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    if (!data || data.length === 0) break;
-    allRows.push(...data);
-    if (data.length < PAGE_SIZE) break;
-    page++;
+  if (levels && levels.length > 0) {
+    query = query.in("level", levels);
   }
 
-  const stateSet = new Set<string>();
-  const countySet = new Set<string>();
-  const districtSet = new Set<string>();
-
-  for (const r of allRows) {
-    if (r.region_type === "state") {
-      stateSet.add(r.region_id);
-    } else if (r.region_type === "county") {
-      countySet.add(r.region_id);
-      stateSet.add(r.region_id.substring(0, 2));
-    } else if (r.region_type === "congressional_district") {
-      districtSet.add(r.region_id);
-      stateSet.add(r.region_id.substring(0, 2));
-    } else if (r.region_type === "state_legislative_upper" || r.region_type === "state_legislative_lower") {
-      // SLD elections contribute to state highlighting but don't have their own map layer
-      stateSet.add(r.region_id.substring(0, 2));
-    }
+  const { count, error } = await query;
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({
-    statesWithElections: Array.from(stateSet),
-    countiesWithElections: Array.from(countySet),
-    districtsWithElections: Array.from(districtSet),
-    totalElections: allRows.length,
-  });
+  return NextResponse.json({ totalElections: count ?? 0 });
 }
